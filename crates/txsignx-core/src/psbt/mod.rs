@@ -11,3 +11,7 @@ mod utxo;
 pub use utxo::{PsbtUtxoReport, PsbtUtxoSource, PsbtUtxoStatus};
 mod fee;
 pub use fee::{PsbtFeeReport, PsbtFeeStatus};
+mod report;
+pub use report::{PsbtInputReport, PsbtOutputReport, PsbtReport, PsbtSighashReport};
+mod analyzer;
+pub use analyzer::analyze_psbt;

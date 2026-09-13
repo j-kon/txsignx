@@ -9,3 +9,4 @@ pub use error::AnalysisError;
 pub use transaction::{TransactionReport, analyze_transaction};
 
 pub mod psbt;
+pub use psbt::{PsbtReport, analyze_psbt};
