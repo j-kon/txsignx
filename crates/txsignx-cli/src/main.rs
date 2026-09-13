@@ -9,6 +9,7 @@ use txsignx_core::{analyze_psbt, analyze_transaction};
 
 mod display;
 mod psbt_display;
+mod psbt_input;
 
 #[derive(Parser)]
 #[command(name = "txsignx", version, about = "Bitcoin transaction security before signing.", color = clap::ColorChoice::Never)]
@@ -48,8 +49,8 @@ enum TransactionCommand {
 enum PsbtCommand {
     /// Inspect standard base64 PSBT v0 without modifying or signing it.
     Inspect {
-        #[arg(value_name = "PSBT")]
-        psbt: String,
+        #[command(flatten)]
+        source: psbt_input::PsbtSource,
         #[arg(long)]
         json: bool,
     },
@@ -58,9 +59,10 @@ enum PsbtCommand {
 fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     match cli.command {
         Command::Psbt {
-            command: PsbtCommand::Inspect { psbt, json },
+            command: PsbtCommand::Inspect { source, json },
         } => {
-            let report = analyze_psbt(&psbt)?;
+            let text = psbt_input::read(source)?;
+            let report = analyze_psbt(&text)?;
             let mut stdout = BufWriter::new(io::stdout().lock());
             if json {
                 serde_json::to_writer_pretty(&mut stdout, &report)?;
@@ -103,7 +105,7 @@ fn main() -> ExitCode {
             }
             let _ = writeln!(
                 io::stderr().lock(),
-                "error: invalid command arguments; run txsignx --help for usage"
+                "error: invalid command arguments; choose exactly one PSBT source (text, --file, --stdin); run txsignx --help for usage"
             );
             return ExitCode::from(2);
         }

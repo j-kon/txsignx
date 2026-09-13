@@ -56,3 +56,93 @@ fn malformed_and_argument_errors_never_echo_input() {
         assert!(!stderr.contains("PRIVATE_PSBT_SENTINEL"));
     }
 }
+
+fn stdin(bytes: &[u8], json: bool) -> Output {
+    use std::{io::Write, process::Stdio};
+    let mut command = Command::new(env!("CARGO_BIN_EXE_txsignx"));
+    command.args(["psbt", "inspect", "--stdin"]);
+    if json {
+        command.arg("--json");
+    }
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // An over-limit reader may stop before the writer completes; broken pipe is expected.
+    let _ = child.stdin.take().unwrap().write_all(bytes);
+    child.wait_with_output().unwrap()
+}
+#[test]
+fn file_and_stdin_match_positional_json() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/psbt-unsigned.b64"
+    );
+    let expected = run(&["psbt", "inspect", UNSIGNED, "--json"]);
+    for output in [
+        run(&["psbt", "inspect", "--file", path, "--json"]),
+        stdin(UNSIGNED.as_bytes(), true),
+    ] {
+        assert!(output.status.success(), "{:?}", output);
+        assert!(output.stderr.is_empty());
+        assert_eq!(output.stdout, expected.stdout);
+    }
+    assert!(stdin(PARTIAL.as_bytes(), false).status.success());
+    assert!(run(&["psbt", "inspect", "--file", path]).status.success());
+}
+#[test]
+fn sources_are_required_and_mutually_exclusive_without_echo() {
+    for args in [
+        vec!["psbt", "inspect"],
+        vec!["psbt", "inspect", "PRIVATE_SENTINEL", "--stdin"],
+        vec![
+            "psbt",
+            "inspect",
+            "PRIVATE_SENTINEL",
+            "--file",
+            "PRIVATE_SENTINEL",
+        ],
+        vec!["psbt", "inspect", "--file", "PRIVATE_SENTINEL", "--stdin"],
+    ] {
+        let output = run(&args);
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(
+            !String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("PRIVATE_SENTINEL")
+        );
+    }
+}
+#[test]
+fn bounded_stdin_rejects_excess_binary_and_empty_input() {
+    for bytes in [
+        vec![],
+        vec![0xff, 0xfe],
+        vec![b'A'; txsignx_core::limits::MAX_PSBT_TEXT_BYTES + 1],
+    ] {
+        let output = stdin(&bytes, true);
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8(output.stderr).unwrap().contains("error:"));
+    }
+}
+#[test]
+fn missing_file_reports_safe_error() {
+    let output = run(&[
+        "psbt",
+        "inspect",
+        "--file",
+        "/nonexistent/PRIVATE_SENTINEL",
+        "--json",
+    ]);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        !String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("PRIVATE_SENTINEL")
+    );
+}
