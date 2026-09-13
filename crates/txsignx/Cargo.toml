@@ -1,7 +1,0 @@
-[package]
-name = "txsignx"
-version.workspace = true
-edition.workspace = true
-publish.workspace = true
-repository.workspace = true
-description = "Bitcoin transaction and PSBT security preflight engine built in Rust."

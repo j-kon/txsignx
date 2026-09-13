@@ -1,0 +1,15 @@
+[package]
+name = "txsignx-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+repository.workspace = true
+description = "Reusable Bitcoin raw-transaction analysis for TxSignX."
+
+[dependencies]
+bitcoin.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
