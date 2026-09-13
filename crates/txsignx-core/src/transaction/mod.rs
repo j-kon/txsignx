@@ -9,5 +9,5 @@ mod analyzer;
 pub use analyzer::decode_transaction;
 
 mod report;
-pub use analyzer::analyze_transaction;
+pub use analyzer::{analyze_decoded_transaction, analyze_transaction};
 pub use report::{InputReport, OutputReport, TransactionReport, WitnessItemReport};
