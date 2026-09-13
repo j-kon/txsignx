@@ -1,7 +1,9 @@
 //! Allocation-free resource preflight, not a semantic PSBT implementation.
 //! rust-bitcoin validates the keys, values, required fields and supported version.
 use super::PsbtError;
-use crate::limits::{MAX_PSBT_MAPS, MAX_PSBT_PAIRS, MAX_PSBT_UNSIGNED_TX_BYTES};
+use crate::limits::{
+    MAX_PSBT_MAPS, MAX_PSBT_PAIRS, MAX_PSBT_TAP_TREE_BYTES, MAX_PSBT_UNSIGNED_TX_BYTES,
+};
 use bitcoin::consensus::{Decodable, encode::VarInt};
 
 fn length(bytes: &mut &[u8]) -> Result<usize, PsbtError> {
@@ -24,6 +26,7 @@ pub(super) fn check_framing(bytes: &[u8]) -> Result<(), PsbtError> {
     let mut maps = 0;
     let mut pairs = 0;
     let mut ended_map = false;
+    let mut tree_bytes: usize = 0;
     while !unread.is_empty() {
         let key_len = length(&mut unread)?;
         if key_len == 0 {
@@ -45,6 +48,17 @@ pub(super) fn check_framing(bytes: &[u8]) -> Result<(), PsbtError> {
         // A v0 unsigned transaction uses stripped serialization (4 WU per byte).
         if maps == 0 && key == [0] && value_len > MAX_PSBT_UNSIGNED_TX_BYTES {
             return Err(PsbtError::ResourceLimit);
+        }
+        // The key with exactly one byte 0x06 is an output TapTree. In an input
+        // map, 0x06 requires public-key keydata, so this shape is invalid there.
+        // Bound all such non-global fields without needing semantic map parsing.
+        if maps > 0 && key == [6] {
+            tree_bytes = tree_bytes
+                .checked_add(value_len)
+                .ok_or(PsbtError::ResourceLimit)?;
+            if tree_bytes > MAX_PSBT_TAP_TREE_BYTES {
+                return Err(PsbtError::ResourceLimit);
+            }
         }
         take(&mut unread, value_len)?;
     }

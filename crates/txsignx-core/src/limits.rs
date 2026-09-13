@@ -20,3 +20,7 @@ pub const MAX_PSBT_MAPS: usize = 100_000;
 pub const MAX_PSBT_PAIRS: usize = 100_000;
 /// A v0 unsigned transaction has no witness, so its bytes weigh four WU each.
 pub const MAX_PSBT_UNSIGNED_TX_BYTES: usize = 1_000_000;
+
+/// Aggregate bytes in output TapTree values. Each encoded leaf needs at least
+/// three bytes; this caps dependency expansion at 4,096 leaves before parsing.
+pub const MAX_PSBT_TAP_TREE_BYTES: usize = 12_288;

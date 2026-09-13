@@ -185,3 +185,49 @@ fn unknown_proprietary_and_scripts_are_preserved_but_not_dumped() {
         );
     }
 }
+
+#[test]
+fn synthetic_global_xpub_is_counted_without_exposing_key_or_network() {
+    use bitcoin::bip32::{ChainCode, ChildNumber, DerivationPath, Fingerprint, Xpub};
+    let mut psbt = unsigned();
+    let xpub = Xpub {
+        network: bitcoin::NetworkKind::Test,
+        depth: 0,
+        parent_fingerprint: Fingerprint::default(),
+        child_number: ChildNumber::from_normal_idx(0).unwrap(),
+        public_key: public_key().inner,
+        chain_code: ChainCode::from([2; 32]),
+    };
+    psbt.xpub
+        .insert(xpub, (Fingerprint::from([1; 4]), DerivationPath::default()));
+    let report = analyze_psbt(&encode(&psbt)).unwrap();
+    assert_eq!(report.global_xpub_count, 1);
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(!json.contains(&xpub.to_string()));
+    assert!(!json.contains("testnet") && !json.contains("network"));
+}
+#[test]
+fn checked_in_fixtures_match_documented_builders() {
+    assert_eq!(
+        encode(&unsigned()),
+        include_str!("../../../fixtures/psbt-unsigned.b64").trim()
+    );
+    assert_eq!(
+        encode(&partial()),
+        include_str!("../../../fixtures/psbt-partial.b64").trim()
+    );
+}
+#[test]
+fn nonstandard_explicit_sighash_is_preserved_without_guessing() {
+    let mut psbt = unsigned();
+    psbt.inputs[0].sighash_type = Some(bitcoin::psbt::PsbtSighashType::from_u32(0xdeadbeef));
+    let report = analyze_psbt(&encode(&psbt)).unwrap();
+    assert_eq!(
+        report.inputs[0].sighash_type.as_ref().unwrap().value,
+        0xdeadbeef
+    );
+    assert_eq!(
+        report.inputs[0].sighash_type.as_ref().unwrap().name,
+        "0xdeadbeef"
+    );
+}
