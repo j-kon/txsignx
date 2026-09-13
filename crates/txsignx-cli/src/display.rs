@@ -5,7 +5,7 @@ fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
 
-fn script_name(script_type: ScriptType) -> &'static str {
+pub(crate) fn script_name(script_type: ScriptType) -> &'static str {
     match script_type {
         ScriptType::P2pkh => "P2PKH",
         ScriptType::P2sh => "P2SH",
