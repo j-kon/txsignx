@@ -59,8 +59,30 @@ This is not a professional security audit.
   serde 1.0.229 (derive), serde_json 1.0.151, thiserror 2.0.20, plus the internal
   txsignx-core path dependency. Cargo.lock fixes resolved versions. No standalone
   hex dependency, wallet/node/database/API/async crates were added.
-- `cargo audit --version` reported no installed audit command. It was not
-  installed. No RustSec vulnerability-database audit was performed.
+- RustSec dependency audit on **2026-09-13 (UTC)** using **cargo-audit 0.22.2**:
+  `cargo audit` completed successfully against the committed `Cargo.lock`.
+  No known vulnerabilities affecting the resolved dependency graph were reported.
+  Both `cargo audit` and `cargo audit --json` exited 0. The JSON report recorded
+  **0 vulnerabilities** (`found: false`, empty advisory list) and **no warnings**
+  (`warnings: {}`). No advisories were ignored; no target or severity filters
+  were configured.
+  The tool scanned **49 crate dependencies** using **1,243 database advisories**,
+  at RustSec database revision `b50980aad8b8f14f77e25a97b32dd94bf008b0af`
+  (database last updated `2026-09-09T12:49:52+02:00`). These database advisories
+  are the entries checked, not findings against TxSignX.
+  Audited `Cargo.lock` SHA-256:
+  `229ad17c4f3aa3b475e27022ec381ad05e1f34729699d39a208e0824e24eaee1`.
+  The lockfile and dependency versions were unchanged. Only the explicitly
+  authorized cargo-audit tool was installed with `cargo install cargo-audit --locked`;
+  generated audit JSON was retained locally outside the repository and not committed.
+- Final verification was rerun on 2026-09-13: fmt, all-target/all-feature check,
+  **54 workspace tests**, Clippy with warnings denied, CLI help/version, both
+  human-readable fixtures, and fixture JSON validation with Python and jq all
+  passed. Direct dependencies remained exactly the Milestone 1 set above.
+  The read-only production panic/unwrap/expect/placeholder/unsafe and
+  fee/network/logging spot check found no issues; the unwrap under `src` was
+  confined to a `#[cfg(test)]` module. Secret-pattern and sensitive-file checks
+  found no findings in 26 committed files and 41 Milestone 1 history blobs.
 
 ## Scope
 
