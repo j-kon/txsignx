@@ -162,3 +162,34 @@ fn json_uses_primitives_lowercase_hex_and_null_fee_without_network_or_addresses(
     );
     assert_eq!(serde_json::to_string(&report).unwrap(), serialized);
 }
+
+#[test]
+fn known_genesis_transaction_matches_published_identifier() {
+    // The network is selected solely to obtain a known fixture, never inferred by analysis.
+    let genesis = bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Bitcoin);
+    let report = analyze_transaction(&serialize_hex(&genesis.txdata[0])).unwrap();
+    assert_eq!(
+        report.txid,
+        "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"
+    );
+    assert_eq!(report.wtxid, report.txid);
+    assert_eq!(report.total_output_sats, 5_000_000_000);
+    assert_eq!(report.size_bytes, 204);
+    assert_eq!(report.weight_wu, 816);
+    assert_eq!(report.inputs[0].previous_vout, u32::MAX);
+    assert_eq!(report.inputs[0].previous_txid, "00".repeat(32));
+    assert_eq!(report.outputs[0].script_type, ScriptType::Unknown); // P2PK is outside M1 classification.
+}
+
+#[test]
+fn maximum_u64_output_remains_an_integer_in_json_without_fake_fee() {
+    let mut tx = common::fixture_transaction(false);
+    tx.output.truncate(1);
+    tx.output[0].value = Amount::from_sat(u64::MAX);
+    let report = analyze_transaction(&serialize_hex(&tx)).unwrap();
+    let text = serde_json::to_string(&report).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(json["total_output_sats"].as_u64(), Some(u64::MAX));
+    assert_eq!(json["outputs"][0]["value_sats"].as_u64(), Some(u64::MAX));
+    assert!(json["fee_sats"].is_null());
+}

@@ -103,3 +103,16 @@ fn rejects_weight_above_block_ceiling() {
         Err(AnalysisError::WeightExceeded { .. })
     ));
 }
+
+#[test]
+fn rejects_unknown_segwit_flags_and_superfluous_witness_encoding() {
+    let segwit = SEGWIT.trim();
+    let unsupported_flag = format!("{}03{}", &segwit[..10], &segwit[12..]);
+    let superfluous_witness = format!("{}00{}", &segwit[..232], &segwit[segwit.len() - 8..]);
+    for hex in [unsupported_flag, superfluous_witness] {
+        assert!(matches!(
+            decode_transaction(&hex),
+            Err(AnalysisError::InvalidTransaction(_))
+        ));
+    }
+}
