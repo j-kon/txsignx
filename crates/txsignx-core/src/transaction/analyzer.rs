@@ -2,7 +2,16 @@ use crate::{
     AnalysisError,
     limits::{MAX_TRANSACTION_HEX_CHARS, MAX_TRANSACTION_WEIGHT_WU},
 };
-use bitcoin::{Transaction, consensus::deserialize, hex::FromHex};
+use bitcoin::{
+    Transaction,
+    consensus::deserialize,
+    hex::{DisplayHex, FromHex},
+};
+
+use super::{
+    InputReport, OutputReport, TransactionReport, WitnessItemReport, classify_script,
+    signals_explicit_rbf,
+};
 
 /// Decode strict hexadecimal transaction data under the documented safety limits.
 pub fn decode_transaction(raw_hex: &str) -> Result<Transaction, AnalysisError> {
@@ -31,4 +40,71 @@ pub fn decode_transaction(raw_hex: &str) -> Result<Transaction, AnalysisError> {
         });
     }
     Ok(transaction)
+}
+
+/// Analyze raw transaction facts without network, prevout, wallet or mempool context.
+pub fn analyze_transaction(raw_hex: &str) -> Result<TransactionReport, AnalysisError> {
+    let transaction = decode_transaction(raw_hex)?;
+    let total_output_sats = transaction.output.iter().try_fold(0_u64, |sum, output| {
+        sum.checked_add(output.value.to_sat())
+            .ok_or(AnalysisError::OutputValueOverflow)
+    })?;
+    let inputs: Vec<InputReport> = transaction
+        .input
+        .iter()
+        .enumerate()
+        .map(|(index, input)| InputReport {
+            index,
+            previous_txid: input.previous_output.txid.to_string(),
+            previous_vout: input.previous_output.vout,
+            sequence: input.sequence.to_consensus_u32(),
+            script_sig_hex: input.script_sig.as_bytes().to_lower_hex_string(),
+            script_sig_size_bytes: input.script_sig.len(),
+            witness_item_count: input.witness.len(),
+            witness_items: input
+                .witness
+                .iter()
+                .enumerate()
+                .map(|(index, item)| WitnessItemReport {
+                    index,
+                    size_bytes: item.len(),
+                    hex: item.to_lower_hex_string(),
+                })
+                .collect(),
+            explicit_rbf: signals_explicit_rbf(input.sequence.to_consensus_u32()),
+        })
+        .collect();
+    let outputs = transaction
+        .output
+        .iter()
+        .enumerate()
+        .map(|(index, output)| OutputReport {
+            index,
+            value_sats: output.value.to_sat(),
+            script_pubkey_hex: output.script_pubkey.as_bytes().to_lower_hex_string(),
+            script_pubkey_size_bytes: output.script_pubkey.len(),
+            script_type: classify_script(&output.script_pubkey),
+        })
+        .collect();
+
+    Ok(TransactionReport {
+        txid: transaction.compute_txid().to_string(),
+        wtxid: transaction.compute_wtxid().to_string(),
+        version: transaction.version.0,
+        locktime: transaction.lock_time.to_consensus_u32(),
+        input_count: transaction.input.len(),
+        output_count: transaction.output.len(),
+        size_bytes: transaction.total_size(),
+        weight_wu: transaction.weight().to_wu(),
+        vsize_vb: transaction.vsize(),
+        has_witness: transaction
+            .input
+            .iter()
+            .any(|input| !input.witness.is_empty()),
+        explicit_rbf: inputs.iter().any(|input| input.explicit_rbf),
+        total_output_sats,
+        fee_sats: None,
+        inputs,
+        outputs,
+    })
 }

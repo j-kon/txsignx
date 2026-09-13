@@ -7,3 +7,7 @@ pub use rbf::signals_explicit_rbf;
 
 mod analyzer;
 pub use analyzer::decode_transaction;
+
+mod report;
+pub use analyzer::analyze_transaction;
+pub use report::{InputReport, OutputReport, TransactionReport, WitnessItemReport};

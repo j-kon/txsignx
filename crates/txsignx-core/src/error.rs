@@ -3,6 +3,8 @@ use thiserror::Error;
 /// Failures at the untrusted transaction-input boundary.
 #[derive(Debug, Error)]
 pub enum AnalysisError {
+    #[error("total output value exceeds the report integer range in satoshis")]
+    OutputValueOverflow,
     #[error("raw transaction hex is empty")]
     EmptyInput,
     #[error(
