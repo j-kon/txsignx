@@ -4,3 +4,6 @@ pub use script::{ScriptType, classify_script};
 
 mod rbf;
 pub use rbf::signals_explicit_rbf;
+
+mod analyzer;
+pub use analyzer::decode_transaction;
