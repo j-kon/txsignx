@@ -6,3 +6,6 @@ pub const MAX_TRANSACTION_BYTES: usize = 4_000_000;
 pub const MAX_TRANSACTION_HEX_CHARS: usize = MAX_TRANSACTION_BYTES * 2;
 /// BIP141 block-weight ceiling, used as an upper bound for one transaction.
 pub const MAX_TRANSACTION_WEIGHT_WU: u64 = 4_000_000;
+
+/// Cap structured witness expansion across all inputs, independently of byte size.
+pub const MAX_REPORT_WITNESS_ITEMS: usize = 100_000;

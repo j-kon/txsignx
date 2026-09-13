@@ -1,6 +1,6 @@
 use crate::{
     AnalysisError,
-    limits::{MAX_TRANSACTION_HEX_CHARS, MAX_TRANSACTION_WEIGHT_WU},
+    limits::{MAX_REPORT_WITNESS_ITEMS, MAX_TRANSACTION_HEX_CHARS, MAX_TRANSACTION_WEIGHT_WU},
 };
 use bitcoin::{
     Transaction,
@@ -45,6 +45,16 @@ pub fn decode_transaction(raw_hex: &str) -> Result<Transaction, AnalysisError> {
 /// Analyze raw transaction facts without network, prevout, wallet or mempool context.
 pub fn analyze_transaction(raw_hex: &str) -> Result<TransactionReport, AnalysisError> {
     let transaction = decode_transaction(raw_hex)?;
+    // An empty witness item costs only one serialized byte but creates a report object.
+    // Bound that expansion across the entire transaction before allocating reports.
+    let mut remaining_items = MAX_REPORT_WITNESS_ITEMS;
+    for input in &transaction.input {
+        remaining_items = remaining_items.checked_sub(input.witness.len()).ok_or(
+            AnalysisError::WitnessItemLimitExceeded {
+                max_items: MAX_REPORT_WITNESS_ITEMS,
+            },
+        )?;
+    }
     let total_output_sats = transaction.output.iter().try_fold(0_u64, |sum, output| {
         sum.checked_add(output.value.to_sat())
             .ok_or(AnalysisError::OutputValueOverflow)

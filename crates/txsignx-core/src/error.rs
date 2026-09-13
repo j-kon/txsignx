@@ -3,6 +3,8 @@ use thiserror::Error;
 /// Failures at the untrusted transaction-input boundary.
 #[derive(Debug, Error)]
 pub enum AnalysisError {
+    #[error("witness item count exceeds the {max_items}-item report safety limit")]
+    WitnessItemLimitExceeded { max_items: usize },
     #[error("total output value exceeds the report integer range in satoshis")]
     OutputValueOverflow,
     #[error("raw transaction hex is empty")]
