@@ -113,3 +113,46 @@ fn missing_transaction_argument_fails() {
     assert!(output.stdout.is_empty());
     assert!(!output.stderr.is_empty());
 }
+
+#[test]
+fn json_mode_emits_only_parseable_report_with_null_fee() {
+    let output = run(&["tx", "inspect", SEGWIT.trim(), "--json"]);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        json["txid"],
+        "15a82427768ac422c8ec5e05866b1ec533064d3c242e4d5295171fba113917c6"
+    );
+    assert_eq!(
+        json["wtxid"],
+        "561d35cd60944685cbc9155bb5ea54de63aa4ec39c4ac3f2aa936f127cbeccd1"
+    );
+    assert_eq!(json["weight_wu"], 483);
+    assert_eq!(json["total_output_sats"], 150_000);
+    assert!(json["fee_sats"].is_null());
+    assert!(json.get("network").is_none());
+    assert_eq!(json["inputs"][0]["witness_items"][2]["hex"], "abcd");
+}
+
+#[test]
+fn json_flag_can_precede_transaction_and_preserves_legacy_metrics() {
+    let output = run(&["tx", "inspect", "--json", LEGACY.trim()]);
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["has_witness"], false);
+    assert_eq!(json["size_bytes"], 118);
+    assert_eq!(json["txid"], json["wtxid"]);
+}
+
+#[test]
+fn invalid_json_input_leaves_stdout_empty_and_reports_analysis_error() {
+    let output = run(&["tx", "inspect", "zz", "--json"]);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("invalid hexadecimal")
+    );
+}
