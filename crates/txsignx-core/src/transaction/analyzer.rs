@@ -32,6 +32,11 @@ pub fn decode_transaction(raw_hex: &str) -> Result<Transaction, AnalysisError> {
     let bytes = Vec::<u8>::from_hex(raw_hex)?;
     // This API requires full consumption: trailing bytes are an error.
     let transaction: Transaction = deserialize(&bytes)?;
+    check_transaction_weight(&transaction)?;
+    Ok(transaction)
+}
+
+fn check_transaction_weight(transaction: &Transaction) -> Result<(), AnalysisError> {
     let weight_wu = transaction.weight().to_wu();
     if weight_wu > MAX_TRANSACTION_WEIGHT_WU {
         return Err(AnalysisError::WeightExceeded {
@@ -39,12 +44,19 @@ pub fn decode_transaction(raw_hex: &str) -> Result<Transaction, AnalysisError> {
             max_weight_wu: MAX_TRANSACTION_WEIGHT_WU,
         });
     }
-    Ok(transaction)
+    Ok(())
 }
 
 /// Analyze raw transaction facts without network, prevout, wallet or mempool context.
 pub fn analyze_transaction(raw_hex: &str) -> Result<TransactionReport, AnalysisError> {
-    let transaction = decode_transaction(raw_hex)?;
+    analyze_decoded_transaction(&decode_transaction(raw_hex)?)
+}
+
+/// Inspect already-decoded transaction facts under the same report safety limits.
+pub fn analyze_decoded_transaction(
+    transaction: &Transaction,
+) -> Result<TransactionReport, AnalysisError> {
+    check_transaction_weight(transaction)?;
     // An empty witness item costs only one serialized byte but creates a report object.
     // Bound that expansion across the entire transaction before allocating reports.
     let mut remaining_items = MAX_REPORT_WITNESS_ITEMS;
