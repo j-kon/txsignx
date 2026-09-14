@@ -387,6 +387,7 @@ dependencies = [
  "clap",
  "serde_json",
  "txsignx-core",
+ "txsignx-policy",
 ]
 
 [[package]]
@@ -397,6 +398,15 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "txsignx-policy"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "txsignx-core",
 ]
 
 [[package]]

@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand};
 use txsignx_core::{analyze_psbt, analyze_transaction};
 
 mod display;
+mod preflight;
 mod psbt_display;
 mod psbt_input;
 
@@ -20,6 +21,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// List active development policy rules and deferred context requirements.
+    Policy {
+        #[command(subcommand)]
+        command: PolicyCommand,
+    },
     /// Inspect PSBT v0 / BIP174 metadata.
     Psbt {
         #[command(subcommand)]
@@ -47,6 +53,8 @@ enum TransactionCommand {
 
 #[derive(Subcommand)]
 enum PsbtCommand {
+    /// Evaluate deterministic development policy (exit 0 PASS, 2 REVIEW, 3 BLOCK).
+    Preflight(preflight::PreflightArgs),
     /// Inspect standard base64 PSBT v0 without modifying or signing it.
     Inspect {
         #[command(flatten)]
@@ -56,8 +64,23 @@ enum PsbtCommand {
     },
 }
 
-fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
+#[derive(Subcommand)]
+enum PolicyCommand {
+    /// List rule metadata; reserved rules are not evaluated.
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
     match cli.command {
+        Command::Policy {
+            command: PolicyCommand::List { json },
+        } => return preflight::list(json),
+        Command::Psbt {
+            command: PsbtCommand::Preflight(args),
+        } => return preflight::run(args),
         Command::Psbt {
             command: PsbtCommand::Inspect { source, json },
         } => {
@@ -87,7 +110,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
             stdout.flush()?;
         }
     }
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
 
 fn main() -> ExitCode {
@@ -107,11 +130,11 @@ fn main() -> ExitCode {
                 io::stderr().lock(),
                 "error: invalid command arguments; run txsignx --help for usage"
             );
-            return ExitCode::from(2);
+            return ExitCode::FAILURE;
         }
     };
     match run(cli) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(error) => {
             // Do not echo the raw transaction or panic if stderr itself is unavailable.
             let _ = writeln!(io::stderr().lock(), "error: {error}");
