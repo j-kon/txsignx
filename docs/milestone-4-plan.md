@@ -14,9 +14,13 @@ secret-accepting `parse_descriptor` API. Sanitize every dependency error.
 Validate descriptor size (64 KiB), rangedness, single-path scope, sanity and
 BDK network-kind compatibility before deriving. Require distinct external and
 internal descriptors. Reject every duplicate script, including within a keychain.
+Reject hardened public suffixes/wildcards; allow hardened origin metadata.
+Use a fallible typed public-key translator rather than miniscript definite-key
+derivation, to safely return BIP32 depth/derivation errors.
 Use BDK Wallet 3.1.0 with only std; its bitcoin ^0.32.8 accepts workspace 0.32.102.
 Review the resolved tree and RustSec before committing the dependency.
 
+Cap aggregate key/path work at 200,000 units and derived script bytes at 16 MiB.
 Build a private BTreeMap of script bytes to keychain/index for exactly
 `0..window`; default 1000, allowed 1..=10000. No PSBT-driven expansion.
 Reports contain configured network, window, sorted expected-change indexes and

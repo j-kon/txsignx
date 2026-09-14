@@ -7,7 +7,8 @@ Bitcoin transaction security before signing.
 TxSignX is an open-source Bitcoin transaction and PSBT security preflight engine
 written in Rust. Milestone 1 implements raw-transaction inspection; Milestone 2
 adds PSBT v0 inspection; Milestone 3 adds deterministic development policy
-evaluation. Wallet and node context remain later milestones.
+evaluation; Milestone 4 adds bounded public-descriptor wallet context. Node-backed
+chain context remains a later milestone.
 
 > TxSignX is under active development and is currently intended for development and Regtest testing. Do not rely on it to protect real Bitcoin funds.
 
@@ -278,7 +279,7 @@ read-only, deterministic, no-I/O rule contract.
 
 Findings are ordered by rule registration, then global/input/output location
 and index, with deterministic tie-breaks. The built-in registration order is
-TG002, TG003, TG009, TG010, TG011, TG012, TG013, TG014. The same facts and
+TG002, TG003, TG004, TG005, TG009, TG010, TG011, TG012, TG013, TG014. The same facts and
 configuration produce the same policy JSON, without altering inspection facts.
 
 | Highest finding severity | Decision | Risk level |
@@ -290,7 +291,7 @@ configuration produce the same policy JSON, without altering inspection facts.
 | Critical | BLOCK | Critical |
 
 Risk categories come solely from the highest finding severity. There is no
-accumulated or probabilistic score. PASS means **no active policy requires
+accumulated or probabilistic score. PASS means **no currently evaluated active policy requires
 review or blocking**; REVIEW means an active rule requires human review; BLOCK
 means an active rule is critical/blocking. These are scoped policy outcomes,
 not universal signing permissions or predictions of financial loss.
@@ -316,7 +317,7 @@ bps inclusive. Zero flags every nonzero fee share; zero fee / zero input value
 produces no ratio finding. Widening before addition and multiplication handles
 maximum u64 facts without overflow.
 
-### Active rules
+### Milestone 3 rules (wallet rules are described below)
 
 | Code | Default severity | Trigger |
 |---|---|---|
@@ -404,16 +405,16 @@ facts; they do not reproduce arbitrary script/metadata text.
 | Reserved code | Deferred rule | Required context |
 |---|---|---|
 | TG001 | Wrong Network | Explicit expected network / wallet context |
-| TG004 | Unknown Wallet Input | Descriptor ownership |
-| TG005 | Unknown Change Output | Descriptor/change keychain |
 | TG006 | Immature Coinbase Input | Confirmations / chain height |
 | TG007 | Dust Output | Explicit relay/dust assumptions or node policy |
 | TG008 | Address Reuse | Wallet address/history |
 
-None of these rules is evaluated or approximated. Policy scope remains incomplete:
-wallet ownership, expected network, change detection, confirmations, address reuse,
-coinbase maturity, mempool context and cryptographic signatures are not verified.
-No signing, finalization, broadcasting or wallet/node integration is added.
+These four rules remain deferred. Milestone 4 adds TG004/TG005 only when the
+required caller-provided wallet context is available. Without it, wallet inputs
+and expected change remain unchecked. Configured network does not establish
+network truth. Confirmations, address reuse, coinbase maturity, mempool context
+and cryptographic signatures remain unverified. No signing, finalization,
+broadcasting or node integration is added.
 
 The [public dummy policy fixtures](fixtures/policy/README.md) cover PASS, REVIEW,
 BLOCK and evaluation errors. Run the capstone example:
@@ -428,6 +429,140 @@ and exit status is 3. Additional fixtures isolate absolute fee, percentage fee,
 missing/invalid UTXOs, unusual sighash, nonzero OP_RETURN and unknown scripts.
 See the [Milestone 3 plan](docs/milestone-3-plan.md) and
 [verification record](docs/milestone-3-verification.md).
+
+## Milestone 4 — Descriptor-aware wallet context
+
+Wallet mode asks whether supplied PSBT scripts match **caller-provided public
+wallet descriptors within a bounded window**. It cannot establish on-chain UTXO
+existence, synchronization, ownership of private keys, balances or confirmations.
+
+```text
+txsignx-core -> immutable PsbtReport
+txsignx-wallet -> immutable WalletContextReport
+txsignx-policy -> PolicyReport
+txsignx-cli -> human or JSON output
+```
+
+The wallet crate depends on core and BDK Wallet 3.1.0 descriptor APIs; policy
+reads wallet facts without deriving scripts. Core remains independent of BDK,
+wallet and policy. No BDK Wallet or chain backend is instantiated. Wallet context
+exists only in memory; no wallet database, cache or derivation state is saved.
+
+### Wallet-aware preflight
+
+```sh
+cargo run -p txsignx-cli -- psbt preflight --file fixtures/wallet/payment.b64 \
+  --external-descriptor-file fixtures/wallet/external.desc \
+  --internal-descriptor-file fixtures/wallet/internal.desc \
+  --network regtest --expected-change-output 1 --json
+```
+
+The public demo payment has an external input at index 7, an unmatched recipient
+output, and internal change at index 3. It returns PASS/0 under development
+thresholds. Replacing the PSBT file with `fixtures/wallet/change-hijack.b64`
+returns TG005/CRITICAL/BLOCK and exit 3. `external-change.b64` returns TG005/HIGH/
+REVIEW (2); `foreign-input.b64` and `collaborative.b64` return TG004/HIGH/REVIEW (2).
+See [fixture details](fixtures/wallet/README.md).
+
+Any wallet flag enables whole-configuration validation: external descriptor,
+internal descriptor and explicit network are required. Direct
+`--external-descriptor` / `--internal-descriptor` options are supported, each
+mutually exclusive with its file option. Positional, `--file` and `--stdin` PSBT
+sources remain supported. Invalid configuration/runtime errors return 1 with
+empty stdout. Valid JSON is flushed before PASS/REVIEW/BLOCK exits 0/2/3.
+
+**Prefer descriptor files.** Descriptors and xpubs reveal wallet activity and
+relationships even though they cannot sign. Direct arguments may remain visible
+in shell history and process listings. Errors and reports never repeat the
+descriptors, xpubs, key origins, checksums or descriptor file contents. Reports
+still expose the existing inspected transaction scripts and graph.
+
+### Descriptor and derivation boundary
+
+Only `Descriptor<DescriptorPublicKey>::from_str` parses descriptor input. Secret-
+accepting string conversion / `parse_descriptor` is never used. Typed public
+keys reject xprv/tprv, WIF and secret-key descriptor representations; test-only
+dummy encodings cover rejection. Raw secret encodings are not an accepted input
+format; valid public/x-only keys remain public keys. Parser/dependency errors
+are mapped to static sanitized errors without source strings.
+
+Both descriptors must be ranged, single-path and distinct. Hardened derivation
+suffixes/wildcards are rejected (hardened origin metadata is permitted). Public
+BIP32 derivation uses a fallible typed translator; exhausted depth and other
+BIP32 errors cannot reach miniscript's definite-key panic assumptions. All
+script collisions, including distinct descriptors that overlap, return an error.
+There is no arbitrary external/internal preference.
+
+`--network` accepts `bitcoin` (alias `mainnet`), `testnet`, `testnet4`, `signet`,
+`regtest`. JSON emits the canonical configured name. BDK checks extended-key
+main/test compatibility. Test-family prefixes do not distinguish their networks.
+Neither PSBT nor script supplies a detected network; TG001 remains deferred.
+
+`--derivation-window COUNT` defaults to **1000**, permits **1..=10000**, and derives
+exactly indexes `0..COUNT` on each keychain: 999 is included at 1000; 1000 is not.
+PSBT contents never expand the window. Additional denial-of-service limits are
+64 KiB per descriptor (files read at most limit+1 bytes), 200,000 aggregate
+key/path work units across the requested window, and 16 MiB derived script bytes.
+Complex descriptors may therefore require a smaller window.
+
+`NoMatchWithinWindow` means only that no matching script was found in that
+window, **not** that a script universally does not belong to the wallet. Valid
+resolved core prevouts are matched as External(index), Internal(index), or
+NoMatchWithinWindow; missing/invalid core prevouts become Unavailable with a typed
+reason. Outputs are classified from unsigned-transaction scripts. There are no
+amount, position, address or script-type change heuristics.
+
+### Explicit change, rules and schema
+
+Repeat `--expected-change-output INDEX` for each intended change output. Indexes
+are zero-based, must exist, and duplicates are rejected; reports sort them.
+Ordinary recipient outputs need not match the wallet and are not TG005 findings.
+
+| Rule | Trigger | Result |
+|---|---|---|
+| TG004 | Valid prevout with no descriptor match in the window | HIGH / REVIEW |
+| TG005 | Declared change matches internal keychain | No finding |
+| TG005 | Declared change matches external keychain | HIGH / REVIEW |
+| TG005 | Declared change has no match in the window | CRITICAL / BLOCK |
+
+TG004 does not duplicate missing TG010 or invalid TG009 context findings.
+Foreign inputs can be legitimate in Payjoin/CoinJoin/multi-party transactions.
+There are **10 active rules and 4 deferred rules** (TG001/TG006/TG007/TG008).
+
+Wallet-aware JSON adds `wallet_context` alongside `inspection` and `policy`.
+It includes `configured_network`, `derivation_window`, sorted
+`expected_change_outputs`, `inputs` and `outputs`. Ownership is tagged with
+`type`: `external` / `internal` plus `derivation_index`, `no_match_within_window`,
+or `unavailable` plus `reason`. Each output has `expected_change`. The optional
+wallet section is omitted entirely when no wallet context is supplied.
+
+`policy.rule_evaluations` has one entry per active registered rule, with `code`,
+`status` and optional typed `reason` (serialized as null when absent).
+`evaluated_rules` is retained and includes fully or partially run rules, excluding
+not-evaluated rules. Findings remain deterministic and ordered by registry then
+location. Wallet facts are privately constructed and checked against the
+inspection's transaction ID, ordered scripts and UTXO statuses before policy use.
+
+| Rule/context | Status | Reason |
+|---|---|---|
+| TG004, all input context usable | evaluated | null |
+| TG004, some input context unavailable | partially_evaluated | some_input_context_unavailable |
+| TG004, no usable inputs | not_evaluated | no_usable_input_context |
+| TG005, no explicit expected change | not_evaluated | no_expected_change_output |
+| TG005, expected change provided | evaluated | null |
+| TG004/TG005, no wallet context | not_evaluated | no_wallet_context |
+
+Existing no-wallet preflight decisions and exit codes remain unchanged. PASS
+means no currently evaluated active rule requires review or blocking; consult
+scope and evaluation statuses. It never implies that skipped wallet checks,
+network truth or chain state were verified. Human output displays the same
+classifications, explicit change markers and evaluation statuses.
+
+No signing, finalization, broadcast, network I/O, RPC, persistence, balances,
+wallet history or chain synchronization is implemented. Milestone 5 will address
+node-backed chain context separately. This is not a professional security audit.
+See [design](docs/milestone-4-plan.md) and
+[verification](docs/milestone-4-verification.md).
 
 ## Development verification
 
@@ -452,13 +587,14 @@ are required. See [fixture notes](crates/txsignx-core/tests/fixtures/README.md).
 - [x] Milestone 1 — Raw transaction analysis
 - [x] Milestone 2 — PSBT inspection
 - [x] Milestone 3 — Deterministic policy engine
-- [ ] Milestone 4 — Descriptor wallet context
+- [x] Milestone 4 — Descriptor wallet context
 - [ ] Milestone 5 — Bitcoin Core / Regtest integration
 - [ ] Milestone 6 — API/web integration and capstone polish
 
 ## Workspace boundaries
 
-This repository contains `crates/txsignx-core`, `crates/txsignx-policy`, and
+This repository contains `crates/txsignx-core`, `crates/txsignx-wallet`,
+`crates/txsignx-policy`, and
 `crates/txsignx-cli`.
 The sibling [web application](https://github.com/j-kon/txsignx-web) and
 [documentation](https://github.com/j-kon/txsignx-docs) are independent repositories.
