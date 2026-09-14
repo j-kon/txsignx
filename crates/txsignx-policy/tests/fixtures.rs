@@ -106,3 +106,11 @@ fn negative_fee_inspection_cannot_become_successful_policy_evaluation() {
         Err(PolicyError::UnevaluableFeeState)
     );
 }
+
+demo!(
+    extension_metadata_pass,
+    "extension-metadata",
+    Pass,
+    Low,
+    ["TG012"]
+);

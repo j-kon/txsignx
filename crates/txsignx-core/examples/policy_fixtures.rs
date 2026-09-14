@@ -40,6 +40,15 @@ fn main() {
     let mut negative = base();
     negative.inputs[0].witness_utxo.as_mut().unwrap().value = Amount::from_sat(1);
     cases.push(("negative-fee", negative));
+    let mut extension = base();
+    extension.unknown.insert(
+        bitcoin::psbt::raw::Key {
+            type_value: 0xee,
+            key: b"PUBLIC_DUMMY_KEY".to_vec(),
+        },
+        b"\x1b[31mPRIVATE_SENTINEL".to_vec(),
+    );
+    cases.push(("extension-metadata", extension));
     for (name, psbt) in cases {
         println!("{name}\t{}", STANDARD.encode(psbt.serialize()));
     }

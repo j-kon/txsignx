@@ -209,3 +209,42 @@ fn existing_inspect_remains_successful_for_policy_blocking_input() {
     assert_eq!(report["fee"]["fee_sats"], 800000);
     assert!(report.get("policy").is_none());
 }
+
+#[test]
+fn preflight_reuses_bounded_stdin_and_rejects_binary() {
+    for bytes in [
+        vec![0xff],
+        vec![b'A'; txsignx_core::limits::MAX_PSBT_TEXT_BYTES + 1],
+    ] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_txsignx"))
+            .args(["psbt", "preflight", "--stdin", "--json"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let _ = child.stdin.take().unwrap().write_all(&bytes);
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert!(out.stdout.is_empty());
+    }
+}
+#[test]
+fn privacy_extension_fixture_does_not_emit_arbitrary_terminal_text() {
+    let input = include_str!("../../../fixtures/policy/extension-metadata.b64");
+    for mode in [vec![], vec!["--json"]] {
+        let mut args = vec!["psbt", "preflight", input];
+        args.extend(mode);
+        let out = run(&args);
+        assert_eq!(out.status.code(), Some(0));
+        assert!(out.stderr.is_empty());
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(text.contains("TG012"));
+        assert!(
+            !text.contains("PRIVATE_SENTINEL")
+                && !text.contains("PUBLIC_DUMMY_KEY")
+                && !text.contains('\x1b')
+        );
+        assert!(!text.contains(input.trim()));
+    }
+}

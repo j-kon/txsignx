@@ -25,6 +25,7 @@ saved as `<name>.b64` with a terminal newline. It performs no file writes.
 | unusual-sighash | Explicit numeric sighash 2 (NONE): REVIEW, TG011 |
 | op-return | Changes the 100,000-sat first output to OP_RETURN: BLOCK, TG014 |
 | unknown-script | Changes the first output to OP_TRUE, an unrecognized template: REVIEW, TG013 |
+| extension-metadata | Adds an unknown global key with public dummy marker bytes and a terminal escape: PASS / LOW, TG012; raw contents suppressed |
 | negative-fee | Supplies only 1 input sat against 150,000 output sats: inspection succeeds with negative_fee; preflight returns evaluation error, exit 1 |
 
 Fee fixtures retain two outputs; the second has zero value and a recognized
