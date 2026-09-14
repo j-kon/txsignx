@@ -51,44 +51,54 @@ Engine” brief, approved 2026-09-14. This plan records its implementation choic
 For each implementation task, add behavior tests, observe the intended failure,
 implement, rerun the focused suite, and commit the coherent result.
 
-- [ ] Models and configuration: create `crates/txsignx-policy/Cargo.toml`,
+- [x] Models and configuration: create `crates/txsignx-policy/Cargo.toml`,
   `src/{lib,model,config,error}.rs`; register crate in root Cargo.toml.
   `PolicyConfig::validate() -> Result<(), PolicyError>`; serde snake_case enums
   and tagged locations. Tests: defaults, bps 0/10,000/10,001 and JSON shape.
-- [ ] Engine: `src/engine.rs`; `PolicyRule::{metadata,evaluate}`,
+- [x] Engine: `src/engine.rs`; `PolicyRule::{metadata,evaluate}`,
   `PolicyContext<'a>`, `PolicyEngine::new(Vec<Box<dyn PolicyRule>>)`,
   `evaluate(&PsbtReport, &PolicyConfig) -> Result<PolicyReport, PolicyError>`.
   Test each severity mapping, empty results, dominance, duplicate rejection,
   inactive rules, stable ordering, immutability and fee-state errors.
-- [ ] Fee rules: `src/rules/fees.rs`; TG002 `fee > threshold`, TG003
+- [x] Fee rules: `src/rules/fees.rs`; TG002 `fee > threshold`, TG003
   `u128(fee)*10000 > (u128(outputs)+u128(fee))*u128(bps)`.
   Test below/equal/above, 800k/900k, zero denominator, u64 boundaries,
   unavailable fees and threshold overrides.
-- [ ] Context rules: `src/rules/utxo.rs`; input-scoped invalid/missing findings.
+- [x] Context rules: `src/rules/utxo.rs`; input-scoped invalid/missing findings.
   Test each invalid status, missing, valid, mixed invalid/missing inputs, fee
   suppression and exact input locations.
-- [ ] Sighash rule: `src/rules/sighash.rs`; test absent, 0, 1, 2, 3, 0x81,
+- [x] Sighash rule: `src/rules/sighash.rs`; test absent, 0, 1, 2, 3, 0x81,
   0x82, 0x83 and nonstandard numeric values, independently of display strings.
-- [ ] Metadata/script rules: `src/rules/metadata.rs`, `scripts.rs`; aggregate
+- [x] Metadata/script rules: `src/rules/metadata.rs`, `scripts.rs`; aggregate
   extension counts; unknown templates per input/output; positive OP_RETURN
   output value blocks. Test all metadata locations, large counts, unknown vs
   recognized templates, zero/nonzero OP_RETURN, deterministic rule ordering.
-- [ ] Registry and fixtures: `src/rules/mod.rs`, `src/registry.rs`; metadata for
+- [x] Registry and fixtures: `src/rules/mod.rs`, `src/registry.rs`; metadata for
   eight active and six reserved rules. Programmatic public dummy fixture
   generation in a core example and checked-in `fixtures/policy/*.b64` for PASS,
   absolute fee, percentage fee, 800k fee demo, missing/invalid context, sighash,
   OP_RETURN and unknown scripts; document origins and expected codes.
-- [ ] CLI: extend existing main and reuse `psbt_input::PsbtSource`; add
+- [x] CLI: extend existing main and reuse `psbt_input::PsbtSource`; add
   `preflight.rs` presentation, policy list, config flags. Integration tests for
   all sources, JSON, overrides, invalid bps, exit codes, errors, privacy and
   unchanged inspect behavior. No duplicated bounded-reader implementation.
-- [ ] Security review: independent source review plus local arithmetic,
+- [x] Security review: independent source review plus local arithmetic,
   determinism, privacy, mutation and unavailable-fee checks. Fix real findings
   with regression tests. Scan changed files for secrets without printing values.
-- [ ] Documentation and full verification: README architecture/rules/deferred
+- [x] Documentation and full verification: README architecture/rules/deferred
   codes/config/scope/usage/exit semantics; retain warning. Run fmt, all-target
   check, workspace tests, Clippy -D warnings and RustSec. Manually validate every
   demo including 100k outputs / 800k fee BLOCK with TG002 and TG003. Record in
   `docs/milestone-3-verification.md`; mark roadmap only after success.
-- [ ] Final scope and history inspection; normal push to origin; verify remote
-  HEAD matches. Stop without creating PR #3 or beginning Milestone 4.
+- [x] Final scope and history inspection; prepare the verified branch for normal
+  push. The final session handoff verifies remote HEAD, then stops without PR #3
+  or Milestone 4.
+
+## Completion record
+
+Implementation and verification completed 2026-09-14. All 167 workspace tests
+pass (100 preserved + 67 new), fmt/check/Clippy pass, and RustSec reports zero
+known vulnerabilities or warnings. Independent review found no blocking issues.
+All required demonstrations passed, including the 800k fee BLOCK scenario.
+See `milestone-3-verification.md`. The final normal push and remote HEAD equality
+are reported in the session after committing the verification record.

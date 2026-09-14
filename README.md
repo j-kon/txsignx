@@ -451,7 +451,7 @@ are required. See [fixture notes](crates/txsignx-core/tests/fixtures/README.md).
 
 - [x] Milestone 1 — Raw transaction analysis
 - [x] Milestone 2 — PSBT inspection
-- [ ] Milestone 3 — Deterministic policy engine
+- [x] Milestone 3 — Deterministic policy engine
 - [ ] Milestone 4 — Descriptor wallet context
 - [ ] Milestone 5 — Bitcoin Core / Regtest integration
 - [ ] Milestone 6 — API/web integration and capstone polish
