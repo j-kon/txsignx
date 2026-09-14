@@ -1,7 +1,10 @@
 use crate::WalletError;
 use bdk_wallet::{
     descriptor::{ExtendedDescriptor, IntoWalletDescriptor},
-    miniscript::Descriptor,
+    miniscript::{
+        ForEachKey,
+        descriptor::{DescriptorPublicKey, Wildcard},
+    },
 };
 use bitcoin::{Network, secp256k1::Secp256k1};
 use serde::Serialize;
@@ -73,6 +76,12 @@ impl WalletConfig {
         }
         let external = parse(external, network, WalletError::InvalidExternalDescriptor)?;
         let internal = parse(internal, network, WalletError::InvalidInternalDescriptor)?;
+        // Count key/path operations as well as indexes, so complex descriptors
+        // cannot multiply a permitted window into excessive work.
+        let work = derivation_work(&external).saturating_add(derivation_work(&internal));
+        if work.saturating_mul(u64::from(window)) > 200_000 {
+            return Err(WalletError::ResourceLimit);
+        }
         if external == internal {
             return Err(WalletError::AmbiguousScripts);
         }
@@ -95,6 +104,24 @@ fn parse(
     // This FromStr only accepts DescriptorPublicKey. Do NOT replace with
     // parse_descriptor or IntoWalletDescriptor on a string (both accept secrets).
     let descriptor: ExtendedDescriptor = text.trim().parse().map_err(|_| error)?;
+    // miniscript's definite-key conversion assumes no hardened paths. Enforce
+    // this structurally before any conversion; origins may legitimately be hardened.
+    if !descriptor.for_each_key(|key| match key {
+        DescriptorPublicKey::XPub(key) => {
+            key.wildcard != Wildcard::Hardened
+                && key
+                    .derivation_path
+                    .into_iter()
+                    .all(|child| !child.is_hardened())
+        }
+        DescriptorPublicKey::Single(_) => true,
+        DescriptorPublicKey::MultiXPub(_) => false,
+    }) {
+        if descriptor.is_multipath() {
+            return Err(WalletError::MultipathDescriptor);
+        }
+        return Err(error);
+    }
     descriptor.sanity_check().map_err(|_| error)?;
     if !descriptor.has_wildcard() {
         return Err(WalletError::NonRangedDescriptor);
@@ -110,7 +137,19 @@ fn parse(
         return Err(error);
     }
     // Validate public derivability before accepting configuration.
-    let definite: Descriptor<_> = descriptor.at_derivation_index(0).map_err(|_| error)?;
-    definite.derived_descriptor(&secp).map_err(|_| error)?;
+    crate::derive::script(&descriptor, 0, &secp).map_err(|_| error)?;
     Ok(descriptor)
+}
+
+fn derivation_work(descriptor: &ExtendedDescriptor) -> u64 {
+    let mut work = 0u64;
+    descriptor.for_each_key(|key| {
+        let steps = match key {
+            DescriptorPublicKey::XPub(key) => key.derivation_path.len() as u64 + 1,
+            _ => 1,
+        };
+        work = work.saturating_add(steps);
+        true
+    });
+    work
 }

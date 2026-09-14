@@ -2,6 +2,7 @@ use std::{error::Error, fmt};
 /// Deliberately contains no caller strings or dependency error sources.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WalletError {
+    ResourceLimit,
     InvalidExternalDescriptor,
     InvalidInternalDescriptor,
     InvalidNetwork,
@@ -19,6 +20,7 @@ pub enum WalletError {
 impl fmt::Display for WalletError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::ResourceLimit => "descriptor derivation exceeds the wallet resource budget",
             Self::InvalidExternalDescriptor => {
                 "external descriptor is invalid for the configured network or public derivation"
             }

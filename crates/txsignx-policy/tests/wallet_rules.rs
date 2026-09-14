@@ -180,3 +180,28 @@ fn multiple_expected_change_findings_are_sorted_by_output() {
         ]
     );
 }
+#[test]
+fn mismatched_wallet_report_is_rejected_by_policy() {
+    let mut r = inspection();
+    let context = WalletIndex::new(wallet::config(10))
+        .unwrap()
+        .classify(&r, &[1])
+        .unwrap();
+    r.outputs[1].transaction_output.script_pubkey_hex = wallet::script(2, 3).to_hex_string();
+    assert_eq!(
+        PolicyEngine::development().unwrap().evaluate_with_wallet(
+            &r,
+            &PolicyConfig::default(),
+            Some(&context)
+        ),
+        Err(PolicyError::InconsistentWalletContext)
+    );
+}
+#[test]
+fn policy_reports_are_deterministic_with_wallet_context() {
+    let r = inspection();
+    let first = serde_json::to_string(&evaluate(&r, &[1])).unwrap();
+    for _ in 0..3 {
+        assert_eq!(serde_json::to_string(&evaluate(&r, &[1])).unwrap(), first);
+    }
+}

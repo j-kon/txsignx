@@ -360,3 +360,12 @@ fn no_wallet_context_omits_optional_report_and_keeps_m3_decisions() {
         assert!(json(&out).get("wallet_context").is_none());
     }
 }
+#[test]
+fn hardened_public_descriptor_suffixes_fail_safely_in_cli() {
+    for suffix in ["/0h/*", "/0/*h"] {
+        let mut a = args("payment.b64");
+        a[3] = "--external-descriptor".into();
+        a[4] = fixture("external.desc").replace("/0/*", suffix);
+        fails_safely(&a);
+    }
+}

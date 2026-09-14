@@ -70,3 +70,33 @@ fn rejects_cross_inspection_context_reuse() {
     r.inputs[0].utxo.script_pubkey_hex = Some(common::script(0, 8).to_hex_string());
     assert_eq!(context.validate_for(&r), Err(WalletError::ContextMismatch));
 }
+#[test]
+fn malformed_valid_script_and_inconsistent_indexes_are_errors() {
+    let index = WalletIndex::new(common::config(1)).unwrap();
+    let mut r = inspection();
+    r.inputs[0].utxo.script_pubkey_hex = None;
+    assert_eq!(
+        index.classify(&r, &[]).err(),
+        Some(WalletError::InconsistentInspection)
+    );
+    r.inputs[0].utxo.script_pubkey_hex = Some("not-hex".into());
+    assert!(index.classify(&r, &[]).is_err());
+    let mut r = inspection();
+    r.outputs[0].transaction_output.index = 99;
+    assert!(index.classify(&r, &[]).is_err());
+}
+#[test]
+fn reports_are_deterministic_and_descriptor_free() {
+    let index = WalletIndex::new(common::config(10)).unwrap();
+    let r = inspection();
+    let before = serde_json::to_string(&r).unwrap();
+    let first = serde_json::to_string(&index.classify(&r, &[1]).unwrap()).unwrap();
+    for _ in 0..5 {
+        assert_eq!(
+            serde_json::to_string(&index.classify(&r, &[1]).unwrap()).unwrap(),
+            first
+        );
+    }
+    assert!(!first.contains("tpub") && !first.contains("wpkh(") && !first.contains("binding"));
+    assert_eq!(serde_json::to_string(&r).unwrap(), before);
+}

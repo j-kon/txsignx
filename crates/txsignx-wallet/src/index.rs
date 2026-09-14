@@ -11,14 +11,16 @@ impl WalletIndex {
     pub fn new(config: WalletConfig) -> Result<Self, WalletError> {
         let secp = Secp256k1::verification_only();
         let mut scripts = BTreeMap::new();
+        let mut script_bytes = 0usize;
         for (descriptor, internal) in [(&config.external, false), (&config.internal, true)] {
             for derivation_index in 0..config.window {
-                let script = descriptor
-                    .at_derivation_index(derivation_index)
-                    .map_err(|_| WalletError::DerivationFailed)?
-                    .derived_descriptor(&secp)
-                    .map_err(|_| WalletError::DerivationFailed)?
-                    .script_pubkey();
+                let script = crate::derive::script(descriptor, derivation_index, &secp)?;
+                script_bytes = script_bytes
+                    .checked_add(script.len())
+                    .ok_or(WalletError::ResourceLimit)?;
+                if script_bytes > 16 * 1024 * 1024 {
+                    return Err(WalletError::ResourceLimit);
+                }
                 let ownership = if internal {
                     WalletOwnership::Internal { derivation_index }
                 } else {
