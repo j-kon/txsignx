@@ -558,6 +558,8 @@ dependencies = [
 name = "txsignx-policy"
 version = "0.1.0"
 dependencies = [
+ "bdk_wallet",
+ "bitcoin",
  "serde",
  "serde_json",
  "txsignx-core",

@@ -12,4 +12,6 @@ txsignx-core.workspace = true
 txsignx-wallet.workspace = true
 
 [dev-dependencies]
+bitcoin.workspace = true
+bdk_wallet.workspace = true
 serde_json.workspace = true

@@ -6,6 +6,8 @@ impl PolicyEngine {
         Self::new(vec![
             Box::new(ExcessiveAbsoluteFee),
             Box::new(ExcessiveFeePercentage),
+            Box::new(UnknownWalletInput),
+            Box::new(UnknownChangeOutput),
             Box::new(InvalidUtxoContext),
             Box::new(MissingUtxoContext),
             Box::new(UnusualSighashType),
@@ -37,16 +39,6 @@ pub fn rule_catalog() -> Result<RuleCatalog, PolicyError> {
             "explicit expected network / wallet context",
         ),
         (
-            "TG004",
-            "Unknown Wallet Input",
-            "descriptor wallet ownership context",
-        ),
-        (
-            "TG005",
-            "Unknown Change Output",
-            "descriptor/change keychain context",
-        ),
-        (
             "TG006",
             "Immature Coinbase Input",
             "chain confirmation/height context",
@@ -62,7 +54,7 @@ pub fn rule_catalog() -> Result<RuleCatalog, PolicyError> {
     .map(|(code, title, context)| DeferredRuleMetadata {
         code,
         title,
-        description: "Reserved / deferred; not evaluated in Milestone 3.",
+        description: "Reserved / deferred; not evaluated in Milestone 4.",
         active: false,
         required_context: vec![context],
     })

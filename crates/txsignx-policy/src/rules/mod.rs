@@ -8,3 +8,6 @@ mod metadata;
 mod scripts;
 pub use metadata::UnknownOrProprietaryMetadata;
 pub use scripts::{NonZeroOpReturnValue, UnrecognizedScriptType};
+
+mod wallet;
+pub use wallet::{UnknownChangeOutput, UnknownWalletInput};

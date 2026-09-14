@@ -19,6 +19,7 @@ fn evaluate(
         PsbtFeeStatus::MissingUtxoContext
     };
     rule.evaluate(&PolicyContext {
+        wallet: None,
         inspection: &input,
         config: &config,
     })
@@ -175,6 +176,7 @@ fn unavailable_fee_never_fabricates_threshold_findings() {
             input.fee.fee_sats = Some(u64::MAX);
             assert!(
                 rule.evaluate(&PolicyContext {
+                    wallet: None,
                     inspection: &input,
                     config: &PolicyConfig::default()
                 })

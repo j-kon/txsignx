@@ -1,13 +1,14 @@
 mod common;
 use txsignx_policy::*;
 #[test]
-fn development_registry_has_eight_unique_active_rules_in_order() {
+fn development_registry_has_ten_unique_active_rules_in_order() {
     let engine = PolicyEngine::development().unwrap();
     let metadata = engine.metadata();
     assert_eq!(
         metadata.iter().map(|m| m.code).collect::<Vec<_>>(),
         vec![
-            "TG002", "TG003", "TG009", "TG010", "TG011", "TG012", "TG013", "TG014"
+            "TG002", "TG003", "TG004", "TG005", "TG009", "TG010", "TG011", "TG012", "TG013",
+            "TG014"
         ]
     );
     assert!(
@@ -23,6 +24,7 @@ fn development_registry_has_eight_unique_active_rules_in_order() {
         report.evaluated_rules,
         metadata
             .iter()
+            .filter(|m| !["TG004", "TG005"].contains(&m.code))
             .map(|m| m.code.to_owned())
             .collect::<Vec<_>>()
     );
@@ -36,7 +38,7 @@ fn deferred_codes_are_metadata_only_and_never_evaluated() {
             .iter()
             .map(|m| m.code)
             .collect::<Vec<_>>(),
-        vec!["TG001", "TG004", "TG005", "TG006", "TG007", "TG008"]
+        vec!["TG001", "TG006", "TG007", "TG008"]
     );
     assert!(
         catalog
@@ -45,6 +47,6 @@ fn deferred_codes_are_metadata_only_and_never_evaluated() {
             .all(|m| !m.active && !m.required_context.is_empty())
     );
     let json = serde_json::to_value(catalog).unwrap();
-    assert_eq!(json["active_rules"].as_array().unwrap().len(), 8);
-    assert_eq!(json["deferred_rules"].as_array().unwrap().len(), 6);
+    assert_eq!(json["active_rules"].as_array().unwrap().len(), 10);
+    assert_eq!(json["deferred_rules"].as_array().unwrap().len(), 4);
 }
