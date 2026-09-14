@@ -1,0 +1,16 @@
+[package]
+name = "txsignx-wallet"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+repository.workspace = true
+description = "Ephemeral public descriptor classification of TxSignX inspection facts."
+
+[dependencies]
+bdk_wallet.workspace = true
+bitcoin.workspace = true
+serde.workspace = true
+txsignx-core.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
