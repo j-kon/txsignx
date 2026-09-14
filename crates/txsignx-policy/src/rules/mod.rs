@@ -4,3 +4,7 @@ mod sighash;
 mod utxo;
 pub use sighash::UnusualSighashType;
 pub use utxo::{InvalidUtxoContext, MissingUtxoContext};
+mod metadata;
+mod scripts;
+pub use metadata::UnknownOrProprietaryMetadata;
+pub use scripts::{NonZeroOpReturnValue, UnrecognizedScriptType};
