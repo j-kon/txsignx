@@ -6,7 +6,8 @@ Bitcoin transaction security before signing.
 
 TxSignX is an open-source Bitcoin transaction and PSBT security preflight engine
 written in Rust. Milestone 1 implements raw-transaction inspection; Milestone 2
-adds PSBT v0 inspection. Context-aware policy analysis is planned for later milestones.
+adds PSBT v0 inspection; Milestone 3 adds deterministic development policy
+evaluation. Wallet and node context remain later milestones.
 
 > TxSignX is under active development and is currently intended for development and Regtest testing. Do not rely on it to protect real Bitcoin funds.
 
@@ -136,8 +137,8 @@ consensus validity, standardness, correct signatures, available UTXOs, valid
 amount ranges, finality, wallet ownership, absence of double spending, or safety
 to sign. In particular, decoded amounts can exceed Bitcoin's money supply;
 Milestone 1 reports them without claiming monetary validity. There is no script
-execution, signing, private-key handling, live RPC, wallet, policy
-engine, database, server, or web integration in this milestone.
+execution, signing, private-key handling, live RPC, wallet, database, server,
+or web integration. Raw inspection derives facts; policy evaluation is separate.
 
 Raw scripts and witness data can contain identifying or sensitive data. The
 requested report reproduces those bytes as hex. Review reports before sharing;
@@ -243,11 +244,190 @@ fields internally; this is an inspector, not a sanitizer. Core errors and CLI
 argument diagnostics omit full input and upstream privacy-bearing errors.
 There is no PSBT logging, network inference, address generation, wallet ownership
 claim, signature verification, signing, finalization, extraction, broadcasting,
-node/wallet connection, or policy/severity engine.
+node/wallet connection in inspection. The separate preflight command evaluates
+Milestone 3 policies over these inspection facts.
 
 See [synthetic fixture construction](fixtures/README.md), the
 [implementation plan](docs/milestone-2-plan.md), and
 [verification record](docs/milestone-2-verification.md).
+
+## Milestone 3 — Deterministic development policy
+
+`txsignx-policy` evaluates immutable `PsbtReport` facts from core and returns a
+`PolicyReport`. The CLI owns input handling and presentation. Rules do not
+reparse or modify PSBTs, access the network, use AI, consult time/randomness, or
+make probabilistic decisions. Core has no dependency on policy. This separation
+keeps the engine reusable for later API, React, Flutter FFI and wallet consumers.
+
+```mermaid
+flowchart TD
+    A[PSBT] --> B[txsignx-core: facts]
+    B --> C[PsbtReport]
+    C --> D[txsignx-policy: deterministic interpretation]
+    D --> E[PolicyReport]
+    E --> F[txsignx-cli: presentation]
+```
+
+Every finding includes a code, severity, title, factual message, recommendation
+and global/input/output location. Policy reports include decision, risk level,
+highest severity (null if none), count, ordered findings, evaluated rule codes,
+applied configuration and a scope note. Rules expose metadata used directly by
+`policy list`. Duplicate registry codes are rejected with typed errors.
+Custom rule implementations are trusted application code and must honor the
+read-only, deterministic, no-I/O rule contract.
+
+Findings are ordered by rule registration, then global/input/output location
+and index, with deterministic tie-breaks. The built-in registration order is
+TG002, TG003, TG009, TG010, TG011, TG012, TG013, TG014. The same facts and
+configuration produce the same policy JSON, without altering inspection facts.
+
+| Highest finding severity | Decision | Risk level |
+|---|---|---|
+| None | PASS | Low |
+| Info or Low | PASS | Low |
+| Medium | REVIEW | Medium |
+| High | REVIEW | High |
+| Critical | BLOCK | Critical |
+
+Risk categories come solely from the highest finding severity. There is no
+accumulated or probabilistic score. PASS means **no active policy requires
+review or blocking**; REVIEW means an active rule requires human review; BLOCK
+means an active rule is critical/blocking. These are scoped policy outcomes,
+not universal signing permissions or predictions of financial loss.
+
+### Development thresholds
+
+Defaults: `max_absolute_fee_sats = 100000`, `max_fee_ratio_bps = 1000` (10%).
+These are **TxSignX development policy defaults**, not Bitcoin consensus limits,
+Bitcoin Core relay policy, universal recommendations, or safety guarantees.
+
+The fee share is **fee / total input value**, where total input value is total
+outputs plus the available absolute fee. It is not fee divided by payment value,
+and it is not a feerate. Comparisons use integer arithmetic only:
+
+```text
+fee_sats > max_absolute_fee_sats
+u128(fee_sats) * 10000 >
+    (u128(total_output_sats) + u128(fee_sats)) * u128(max_fee_ratio_bps)
+```
+
+Equality does not trigger either rule. Ratio limits range from 0 through 10,000
+bps inclusive. Zero flags every nonzero fee share; zero fee / zero input value
+produces no ratio finding. Widening before addition and multiplication handles
+maximum u64 facts without overflow.
+
+### Active rules
+
+| Code | Default severity | Trigger |
+|---|---|---|
+| TG002 | Critical | Available absolute fee exceeds configured satoshi limit |
+| TG003 | Critical | Available fee share of total input value exceeds configured bps limit |
+| TG009 | Critical | Input UTXO TXID mismatch, vout out of range, or disagreement between both UTXO forms |
+| TG010 | High | Input previous-output context is missing |
+| TG011 | High | Explicit numeric sighash differs from 0 (DEFAULT) or 1 (ALL) |
+| TG012 | Info | Unknown/proprietary fields exist; one aggregate count-only finding |
+| TG013 | Medium | Output or valid resolved prevout has an unrecognized script template |
+| TG014 | Critical | An OP_RETURN output carries positive value |
+
+TG009 concerns supplied PSBT metadata, not blockchain validity. Missing context
+is reported by TG010 and is not itself a declaration of PSBT invalidity.
+TG011 covers NONE, SINGLE and ANYONECANPAY combinations, and conservatively
+requires review of other explicit numeric values; it does not assert they are
+invalid. Absent explicit sighash is not guessed. Script-version compatibility
+and signature validity are not checked. Unknown templates may be legitimate;
+proprietary metadata is not automatically malicious. TG014 reflects the
+provably unspendable output classification; zero-value OP_RETURN is not flagged.
+
+When UTXO context is missing or invalid, TG002/TG003 emit no fabricated fee
+findings; TG010/TG009 carry the corresponding reason. Mixed invalid and missing
+inputs retain their separate input-scoped findings. Other fee failures
+(`negative_fee`, `overflow`, `other_error`) stop preflight with a typed evaluation
+error, **not PASS**, because no active rule describes those failures. Inconsistent
+fee-state/value/context or map-count combinations are also rejected. Inspection
+remains available separately to examine such facts.
+
+### Commands and exit codes
+
+```sh
+txsignx policy list
+txsignx policy list --json
+txsignx psbt preflight '<BASE64_PSBT>'
+txsignx psbt preflight '<BASE64_PSBT>' --json
+txsignx psbt preflight --file payment.psbt
+txsignx psbt preflight --file payment.psbt --json
+cat payment.psbt | txsignx psbt preflight --stdin
+cat payment.psbt | txsignx psbt preflight --stdin --json
+
+txsignx psbt preflight --file payment.psbt \
+  --max-absolute-fee-sats 50000 --max-fee-ratio-bps 500
+```
+
+The last command sets a 50,000-sat absolute limit and a 5% fee-share limit.
+A filename requires `--file`; positional input is base64 text. Preflight reuses
+Milestone 2's mutually exclusive, bounded input sources. Prefer file/stdin to
+avoid shell history and process-argument exposure. Invalid configuration is
+rejected before reading a file or waiting for stdin.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Preflight PASS; or successful inspect/list/help/version |
+| 1 | Input, configuration, argument, I/O or evaluation error |
+| 2 | Preflight REVIEW |
+| 3 | Preflight BLOCK |
+
+A valid report is flushed before returning REVIEW/BLOCK, including in JSON mode.
+Diagnostics go to stderr; input/evaluation errors produce no report. Argument
+errors now consistently use 1 (earlier inspect versions used 2 for Clap errors),
+so 2 unambiguously denotes REVIEW. Successful inspect behavior and JSON are
+unchanged. Automation must handle 2/3 deliberately rather than treating every
+nonzero exit as malformed JSON. For example:
+
+```sh
+status=0
+txsignx psbt preflight --file fixtures/policy/800k-fee.b64 --json > report.json || status=$?
+case "$status" in
+  0|2|3) python3 -m json.tool report.json ;;
+  *) exit "$status" ;;
+esac
+```
+
+Preflight JSON is `{"inspection": {...}, "policy": {...}}`; it contains no raw
+PSBT. `policy` includes `config` and `scope_note`. `policy list --json` contains
+`active_rules` and `deferred_rules`, with required context and active flags.
+Deferred metadata has no evaluator or assigned severity. Reports expose script
+hex and transaction graphs, but not signatures, xpub strings, key origins, or
+arbitrary metadata values. Findings use controlled text and observed numeric
+facts; they do not reproduce arbitrary script/metadata text.
+
+### Deferred scope and demonstrations
+
+| Reserved code | Deferred rule | Required context |
+|---|---|---|
+| TG001 | Wrong Network | Explicit expected network / wallet context |
+| TG004 | Unknown Wallet Input | Descriptor ownership |
+| TG005 | Unknown Change Output | Descriptor/change keychain |
+| TG006 | Immature Coinbase Input | Confirmations / chain height |
+| TG007 | Dust Output | Explicit relay/dust assumptions or node policy |
+| TG008 | Address Reuse | Wallet address/history |
+
+None of these rules is evaluated or approximated. Policy scope remains incomplete:
+wallet ownership, expected network, change detection, confirmations, address reuse,
+coinbase maturity, mempool context and cryptographic signatures are not verified.
+No signing, finalization, broadcasting or wallet/node integration is added.
+
+The [public dummy policy fixtures](fixtures/policy/README.md) cover PASS, REVIEW,
+BLOCK and evaluation errors. Run the capstone example:
+
+```sh
+./target/debug/txsignx psbt preflight --file fixtures/policy/800k-fee.b64
+```
+
+It reports 100,000 output sats and an 800,000-sat fee from 900,000 supplied input
+sats. TG002 and TG003 are both Critical; decision is BLOCK, risk is Critical,
+and exit status is 3. Additional fixtures isolate absolute fee, percentage fee,
+missing/invalid UTXOs, unusual sighash, nonzero OP_RETURN and unknown scripts.
+See the [Milestone 3 plan](docs/milestone-3-plan.md) and
+[verification record](docs/milestone-3-verification.md).
 
 ## Development verification
 
@@ -271,14 +451,15 @@ are required. See [fixture notes](crates/txsignx-core/tests/fixtures/README.md).
 
 - [x] Milestone 1 — Raw transaction analysis
 - [x] Milestone 2 — PSBT inspection
-- [ ] Milestone 3 — Security policy engine
+- [ ] Milestone 3 — Deterministic policy engine
 - [ ] Milestone 4 — Descriptor wallet context
-- [ ] Milestone 5 — Bitcoin Core integration
+- [ ] Milestone 5 — Bitcoin Core / Regtest integration
 - [ ] Milestone 6 — API/web integration and capstone polish
 
 ## Workspace boundaries
 
-This repository contains only `crates/txsignx-core` and `crates/txsignx-cli`.
+This repository contains `crates/txsignx-core`, `crates/txsignx-policy`, and
+`crates/txsignx-cli`.
 The sibling [web application](https://github.com/j-kon/txsignx-web) and
 [documentation](https://github.com/j-kon/txsignx-docs) are independent repositories.
 The outer workspace is not a Git repository. Sibling `txsignx-brand/` remains
