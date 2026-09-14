@@ -70,3 +70,21 @@ pub struct PreflightReport {
     pub inspection: txsignx_core::PsbtReport,
     pub policy: PolicyReport,
 }
+
+impl RuleMetadata {
+    pub fn finding(
+        &self,
+        location: FindingLocation,
+        message: impl Into<String>,
+        recommendation: &str,
+    ) -> Finding {
+        Finding {
+            code: self.code.to_owned(),
+            severity: self.default_severity,
+            title: self.title.to_owned(),
+            message: message.into(),
+            recommendation: Some(recommendation.to_owned()),
+            location,
+        }
+    }
+}

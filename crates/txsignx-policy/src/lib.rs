@@ -7,3 +7,4 @@ pub use error::PolicyError;
 pub use model::*;
 mod engine;
 pub use engine::{PolicyContext, PolicyEngine, PolicyRule};
+pub mod rules;
