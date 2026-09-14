@@ -23,7 +23,8 @@ Milestone 3 policy implementation is authorized.
   rust-bitcoin CompactSize decoding. Bound map/pair counts and the global
   unsigned transaction length; rust-bitcoin remains the semantic PSBT parser.
   Ensure the reader is exhausted after parsing; preserve unknown/proprietary
-  entries internally and report counts only.
+  entries internally and report counts only. Cap aggregate serialized TapTree
+  values at 12,288 bytes before dependency leaf/branch allocation.
 - Report UTXO source and consistency. Check non-witness TXID, vout, and value/
   script agreement when both forms occur. Resolve nothing from inconsistent
   metadata. Witness-only data is supplied context, not authenticated chain data.
@@ -40,18 +41,26 @@ Milestone 3 policy implementation is authorized.
 
 ## Implementation sequence
 
-- [ ] Refactor decoded transaction analysis; prove raw JSON regression equivalence.
-- [ ] Add bounded base64/PSBT parsing and sanitized errors with adversarial tests.
-- [ ] Add report models and structural signing-state tests.
-- [ ] Add UTXO consistency and absolute-fee inspection with deterministic tests.
-- [ ] Assemble input/output/global reports with metadata counts and reused facts.
-- [ ] Add CLI positional inspection and human output with real process tests.
-- [ ] Add bounded file/stdin sources, JSON output and source-conflict tests.
-- [ ] Add documented synthetic unsigned/partial fixtures and adversarial coverage.
-- [ ] Review security/privacy, update README, run all checks and cargo audit.
-- [ ] Record verified results, inspect scope/secrets and normally push the branch.
+- [x] Refactor decoded transaction analysis; prove raw JSON regression equivalence.
+- [x] Add bounded base64/PSBT parsing and sanitized errors with adversarial tests.
+- [x] Add report models and structural signing-state tests.
+- [x] Add UTXO consistency and absolute-fee inspection with deterministic tests.
+- [x] Assemble input/output/global reports with metadata counts and reused facts.
+- [x] Add CLI positional inspection and human output with real process tests.
+- [x] Add bounded file/stdin sources, JSON output and source-conflict tests.
+- [x] Add documented synthetic unsigned/partial fixtures and adversarial coverage.
+- [x] Review security/privacy, update README, run all checks and cargo audit.
+- [x] Record verified results and inspect scope/secrets before the normal branch push.
 
 Use meaningful incremental conventional commits. Observe failing behavior tests
 before implementing it; retain all 54 Milestone 1 tests. Independent review must
 check UTXO/fee trust, parser allocation limits, privacy, CLI and documentation.
 Only mark Milestone 2 complete after verification succeeds.
+
+## Verification and handoff
+
+Implementation and checks completed on 2026-09-14: 100 tests pass (46 added
+since Milestone 1), fmt/check/Clippy pass, and RustSec reports no advisories.
+See `milestone-2-verification.md` for results and the resolved review finding.
+The final handoff is a normal push of this branch after committing the record,
+with remote HEAD verification reported in the session. No PR or merge follows.
