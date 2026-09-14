@@ -542,6 +542,7 @@ dependencies = [
  "serde_json",
  "txsignx-core",
  "txsignx-policy",
+ "txsignx-wallet",
 ]
 
 [[package]]

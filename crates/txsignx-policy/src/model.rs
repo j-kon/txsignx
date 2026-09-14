@@ -91,6 +91,8 @@ pub struct PolicyReport {
 #[derive(Debug, Clone, Serialize)]
 pub struct PreflightReport {
     pub inspection: txsignx_core::PsbtReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_context: Option<txsignx_wallet::WalletContextReport>,
     pub policy: PolicyReport,
 }
 

@@ -11,6 +11,8 @@ mod display;
 mod preflight;
 mod psbt_display;
 mod psbt_input;
+mod wallet_display;
+mod wallet_input;
 
 #[derive(Parser)]
 #[command(name = "txsignx", version, about = "Bitcoin transaction security before signing.", color = clap::ColorChoice::Never)]

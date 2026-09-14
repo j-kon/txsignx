@@ -11,6 +11,8 @@ use txsignx_policy::{PolicyDecision::*, *};
 pub struct PreflightArgs {
     #[command(flatten)]
     source: PsbtSource,
+    #[command(flatten)]
+    wallet: crate::wallet_input::WalletArgs,
     /// Emit inspection and policy JSON before returning the decision exit code.
     #[arg(long)]
     json: bool,
@@ -29,11 +31,26 @@ pub fn run(args: PreflightArgs) -> Result<ExitCode, Box<dyn Error>> {
     };
     // Reject invalid configuration before reading files or blocking on stdin.
     config.validate()?;
+    let wallet_config = args.wallet.config()?;
     let text = psbt_input::read(args.source)?;
     let inspection = txsignx_core::analyze_psbt(&text)?;
-    let policy = PolicyEngine::development()?.evaluate(&inspection, &config)?;
+    let wallet_context = wallet_config
+        .map(|config| {
+            txsignx_wallet::WalletIndex::new(config)?
+                .classify(&inspection, &args.wallet.expected_change_output)
+        })
+        .transpose()?;
+    let policy = PolicyEngine::development()?.evaluate_with_wallet(
+        &inspection,
+        &config,
+        wallet_context.as_ref(),
+    )?;
     let decision = policy.decision;
-    let report = PreflightReport { inspection, policy };
+    let report = PreflightReport {
+        inspection,
+        wallet_context,
+        policy,
+    };
     let mut stdout = BufWriter::new(io::stdout().lock());
     if args.json {
         serde_json::to_writer_pretty(&mut stdout, &report)?;
@@ -96,6 +113,22 @@ fn write_report(out: &mut impl Write, report: &PreflightReport) -> io::Result<()
         risk_name(report.policy.risk_level),
         report.policy.finding_count
     )?;
+    if let Some(wallet) = &report.wallet_context {
+        crate::wallet_display::write_report(out, wallet)?;
+    }
+    writeln!(out, "\nRule evaluations")?;
+    for evaluation in &report.policy.rule_evaluations {
+        writeln!(
+            out,
+            "  {}: {:?}{}",
+            evaluation.code,
+            evaluation.status,
+            evaluation
+                .reason
+                .map(|r| format!(" ({r:?})"))
+                .unwrap_or_default()
+        )?;
+    }
     let config = &report.policy.config;
     writeln!(
         out,
@@ -108,7 +141,7 @@ fn write_report(out: &mut impl Write, report: &PreflightReport) -> io::Result<()
     if report.policy.decision == Pass {
         writeln!(
             out,
-            "\nNo active Milestone 3 policy requires review or blocking."
+            "\nNo currently evaluated active policy requires review or blocking."
         )?;
     }
     for finding in &report.policy.findings {
