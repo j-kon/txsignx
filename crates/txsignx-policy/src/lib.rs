@@ -7,4 +7,6 @@ pub use error::PolicyError;
 pub use model::*;
 mod engine;
 pub use engine::{PolicyContext, PolicyEngine, PolicyRule};
+mod registry;
 pub mod rules;
+pub use registry::{DeferredRuleMetadata, RuleCatalog, rule_catalog};
