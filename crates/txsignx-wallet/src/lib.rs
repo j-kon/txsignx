@@ -6,3 +6,7 @@ pub use config::{
     WalletConfig,
 };
 pub use error::WalletError;
+mod index;
+mod model;
+pub use index::WalletIndex;
+pub use model::*;
