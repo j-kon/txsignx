@@ -53,6 +53,10 @@ fn missing_invalid_context_is_unavailable_even_if_script_is_present() {
 fn rejects_bad_change_intent() {
     let index = WalletIndex::new(common::config(1)).unwrap();
     assert_eq!(
+        index.classify(&inspection(), &[0, 1, 2]).err(),
+        Some(WalletError::InvalidExpectedChange)
+    );
+    assert_eq!(
         index.classify(&inspection(), &[1, 1]).err(),
         Some(WalletError::DuplicateExpectedChange)
     );

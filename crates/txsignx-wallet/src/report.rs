@@ -94,6 +94,12 @@ impl WalletIndex {
         expected_change: &[usize],
     ) -> Result<WalletContextReport, WalletError> {
         let binding = InspectionBinding::new(inspection)?;
+        if expected_change
+            .iter()
+            .any(|&i| i >= inspection.output_count)
+        {
+            return Err(WalletError::InvalidExpectedChange);
+        }
         if expected_change.len() > inspection.output_count {
             return Err(WalletError::DuplicateExpectedChange);
         }
@@ -101,9 +107,6 @@ impl WalletIndex {
         expected.sort_unstable();
         if expected.windows(2).any(|pair| pair[0] == pair[1]) {
             return Err(WalletError::DuplicateExpectedChange);
-        }
-        if expected.iter().any(|&i| i >= inspection.output_count) {
-            return Err(WalletError::InvalidExpectedChange);
         }
         let mut inputs = Vec::with_capacity(inspection.input_count);
         for input in &inspection.inputs {
