@@ -10,3 +10,5 @@ mod index;
 mod model;
 pub use index::WalletIndex;
 pub use model::*;
+mod report;
+pub use report::{WalletContextReport, WalletInputContext, WalletOutputContext};
