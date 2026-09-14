@@ -39,6 +39,13 @@ fn json_is_only_stdout_and_uses_primitive_fields() {
 }
 #[test]
 fn malformed_and_argument_errors_never_echo_input() {
+    let raw_error = run(&["tx", "inspect"]);
+    assert!(!raw_error.status.success());
+    assert!(
+        !String::from_utf8(raw_error.stderr)
+            .unwrap()
+            .contains("PSBT")
+    );
     for args in [
         vec!["psbt", "inspect", "PRIVATE_PSBT_SENTINEL", "--json"],
         vec![

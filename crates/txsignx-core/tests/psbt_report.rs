@@ -231,3 +231,50 @@ fn nonstandard_explicit_sighash_is_preserved_without_guessing() {
         "0xdeadbeef"
     );
 }
+
+#[test]
+fn serialized_nonwitness_context_checks_txid_vout_and_both_forms() {
+    use txsignx_core::psbt::{PsbtUtxoSource, PsbtUtxoStatus};
+    let mut psbt = unsigned();
+    let mut previous = psbt.unsigned_tx.clone();
+    previous.output[1].value = bitcoin::Amount::from_sat(151_000);
+    psbt.unsigned_tx.input[0].previous_output.txid = previous.compute_txid();
+    psbt.inputs[0].non_witness_utxo = Some(previous.clone());
+    let report = analyze_psbt(&encode(&psbt)).unwrap();
+    assert_eq!(report.inputs[0].utxo.source, PsbtUtxoSource::Both);
+    assert_eq!(report.inputs[0].utxo.status, PsbtUtxoStatus::Valid);
+    assert_eq!(report.fee.fee_sats, Some(1000));
+    psbt.inputs[0].witness_utxo = None;
+    let report = analyze_psbt(&encode(&psbt)).unwrap();
+    assert_eq!(report.inputs[0].utxo.source, PsbtUtxoSource::NonWitnessUtxo);
+    assert_eq!(report.fee.fee_sats, Some(1000));
+    psbt.unsigned_tx.input[0].previous_output.vout = u32::MAX;
+    let report = analyze_psbt(&encode(&psbt)).unwrap();
+    assert_eq!(report.inputs[0].utxo.status, PsbtUtxoStatus::VoutOutOfRange);
+    assert_eq!(report.fee.status, PsbtFeeStatus::InvalidUtxoContext);
+    assert!(report.inputs[0].utxo.value_sats.is_none());
+    psbt.unsigned_tx.input[0].previous_output.vout = 1;
+    psbt.inputs[0].witness_utxo = Some(previous.output[0].clone());
+    let report = analyze_psbt(&encode(&psbt)).unwrap();
+    assert_eq!(
+        report.inputs[0].utxo.status,
+        PsbtUtxoStatus::WitnessNonWitnessMismatch
+    );
+    assert_eq!(report.fee.fee_sats, None);
+    previous.lock_time = bitcoin::absolute::LockTime::ZERO;
+    psbt.inputs[0].non_witness_utxo = Some(previous);
+    let report = analyze_psbt(&encode(&psbt)).unwrap();
+    assert_eq!(report.inputs[0].utxo.status, PsbtUtxoStatus::TxidMismatch);
+    assert_eq!(report.fee.status, PsbtFeeStatus::InvalidUtxoContext);
+}
+#[test]
+fn independent_unsigned_fixture_txid_is_stable() {
+    // Double SHA256 of the 116-byte global unsigned transaction, independently
+    // computed using Python hashlib, reversing digest bytes for conventional TXID.
+    assert_eq!(
+        analyze_psbt(include_str!("../../../fixtures/psbt-unsigned.b64"))
+            .unwrap()
+            .unsigned_txid,
+        "a6375ce044efb3b817642d5b3c584e63e6e5de2b32cbaed1a34b72c1156d6381"
+    );
+}

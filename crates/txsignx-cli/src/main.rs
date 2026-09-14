@@ -105,7 +105,7 @@ fn main() -> ExitCode {
             }
             let _ = writeln!(
                 io::stderr().lock(),
-                "error: invalid command arguments; choose exactly one PSBT source (text, --file, --stdin); run txsignx --help for usage"
+                "error: invalid command arguments; run txsignx --help for usage"
             );
             return ExitCode::from(2);
         }
