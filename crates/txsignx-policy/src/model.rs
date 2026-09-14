@@ -51,7 +51,29 @@ pub struct RuleMetadata {
     pub required_context: Vec<&'static str>,
 }
 
-pub const POLICY_SCOPE: &str = "Policy scope is incomplete. PASS means no active policy requires review or blocking; wallet ownership, expected network, change detection, blockchain confirmations, address reuse, and cryptographic signature validity are not verified.";
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleEvaluationStatus {
+    Evaluated,
+    PartiallyEvaluated,
+    NotEvaluated,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleEvaluationReason {
+    NoWalletContext,
+    NoExpectedChangeOutput,
+    NoUsableInputContext,
+    SomeInputContextUnavailable,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RuleEvaluation {
+    pub code: String,
+    pub status: RuleEvaluationStatus,
+    pub reason: Option<RuleEvaluationReason>,
+}
+pub const WALLET_POLICY_SCOPE: &str = "Policy scope is incomplete. PASS means no currently evaluated active policy requires review or blocking. Wallet matches are bounded by the configured derivation window and supplied prevout facts; only explicitly declared expected change is checked. Consult rule_evaluations for skipped or partial checks. Network, on-chain existence, confirmations, balances, address reuse and signature validity are not verified.";
+pub const POLICY_SCOPE: &str = "Policy scope is incomplete. PASS means no currently evaluated active policy requires review or blocking; wallet-context rules are not evaluated without wallet context; wallet ownership, expected network, change detection, blockchain confirmations, address reuse, and cryptographic signature validity are not verified.";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PolicyReport {
@@ -61,6 +83,7 @@ pub struct PolicyReport {
     pub finding_count: usize,
     pub findings: Vec<Finding>,
     pub evaluated_rules: Vec<String>,
+    pub rule_evaluations: Vec<RuleEvaluation>,
     pub config: PolicyConfig,
     pub scope_note: &'static str,
 }

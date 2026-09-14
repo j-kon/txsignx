@@ -9,6 +9,7 @@ description = "Deterministic policy interpretation of TxSignX inspection facts."
 [dependencies]
 serde.workspace = true
 txsignx-core.workspace = true
+txsignx-wallet.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
