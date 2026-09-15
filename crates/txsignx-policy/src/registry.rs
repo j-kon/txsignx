@@ -4,16 +4,21 @@ use serde::Serialize;
 impl PolicyEngine {
     pub fn development() -> Result<Self, PolicyError> {
         Self::new(vec![
+            Box::new(NodeRule::WrongNetwork),
             Box::new(ExcessiveAbsoluteFee),
             Box::new(ExcessiveFeePercentage),
             Box::new(UnknownWalletInput),
             Box::new(UnknownChangeOutput),
+            Box::new(NodeRule::ImmatureCoinbase),
             Box::new(InvalidUtxoContext),
             Box::new(MissingUtxoContext),
             Box::new(UnusualSighashType),
             Box::new(UnknownOrProprietaryMetadata),
             Box::new(UnrecognizedScriptType),
             Box::new(NonZeroOpReturnValue),
+            Box::new(NodeRule::UtxoUnavailable),
+            Box::new(NodeRule::PrevoutMismatch),
+            Box::new(NodeRule::MempoolConflict),
         ])
     }
 }
@@ -34,16 +39,6 @@ pub struct RuleCatalog {
 pub fn rule_catalog() -> Result<RuleCatalog, PolicyError> {
     let deferred_rules = [
         (
-            "TG001",
-            "Wrong Network",
-            "explicit expected network / wallet context",
-        ),
-        (
-            "TG006",
-            "Immature Coinbase Input",
-            "chain confirmation/height context",
-        ),
-        (
             "TG007",
             "Dust Output",
             "explicit relay/dust policy assumptions or node policy context",
@@ -54,7 +49,7 @@ pub fn rule_catalog() -> Result<RuleCatalog, PolicyError> {
     .map(|(code, title, context)| DeferredRuleMetadata {
         code,
         title,
-        description: "Reserved / deferred; not evaluated in Milestone 4.",
+        description: "Reserved / deferred; not evaluated in Milestone 5.",
         active: false,
         required_context: vec![context],
     })

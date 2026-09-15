@@ -49,6 +49,7 @@ pub fn run(args: PreflightArgs) -> Result<ExitCode, Box<dyn Error>> {
     let report = PreflightReport {
         inspection,
         wallet_context,
+        node_context: None,
         policy,
     };
     let mut stdout = BufWriter::new(io::stdout().lock());

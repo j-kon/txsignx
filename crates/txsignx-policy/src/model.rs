@@ -62,6 +62,7 @@ pub enum RuleEvaluationStatus {
 #[serde(rename_all = "snake_case")]
 pub enum RuleEvaluationReason {
     NoWalletContext,
+    NoNodeContext,
     NoExpectedChangeOutput,
     NoUsableInputContext,
     SomeInputContextUnavailable,
@@ -93,6 +94,8 @@ pub struct PreflightReport {
     pub inspection: txsignx_core::PsbtReport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wallet_context: Option<txsignx_wallet::WalletContextReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_context: Option<txsignx_node::NodeContextReport>,
     pub policy: PolicyReport,
 }
 
@@ -113,3 +116,5 @@ impl RuleMetadata {
         }
     }
 }
+
+pub const NODE_POLICY_SCOPE: &str = "Node-reported point-in-time context from the explicitly configured Bitcoin Core authority; not independent consensus verification. Mempool observations are not atomic and may change after inspection. PASS only describes evaluated policy. Wallet checks require descriptors and explicit change intent; consult rule_evaluations. Signature validity, address reuse, balances and wallet history are not verified.";

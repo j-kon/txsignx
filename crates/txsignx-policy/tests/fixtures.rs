@@ -22,6 +22,7 @@ fn evaluate(text: &str) -> PreflightReport {
     PreflightReport {
         inspection,
         wallet_context: None,
+        node_context: None,
         policy,
     }
 }
