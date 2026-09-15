@@ -5,3 +5,5 @@ pub use config::RpcEndpoint;
 pub use error::NodeError;
 mod rpc;
 pub use rpc::*;
+mod context;
+pub use context::*;
