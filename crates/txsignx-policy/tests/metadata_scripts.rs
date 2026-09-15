@@ -7,6 +7,7 @@ use txsignx_policy::{
 };
 fn evaluate(rule: &dyn PolicyRule, input: &txsignx_core::PsbtReport) -> Vec<Finding> {
     rule.evaluate(&PolicyContext {
+        wallet: None,
         inspection: input,
         config: &PolicyConfig::default(),
     })

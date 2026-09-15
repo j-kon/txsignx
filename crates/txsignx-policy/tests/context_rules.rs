@@ -8,6 +8,7 @@ fn findings(rule: &dyn PolicyRule, status: PsbtUtxoStatus) -> Vec<Finding> {
     let mut input = common::inspection();
     input.inputs[0].utxo.status = status;
     rule.evaluate(&PolicyContext {
+        wallet: None,
         inspection: &input,
         config: &PolicyConfig::default(),
     })
@@ -85,6 +86,7 @@ fn absent_default_and_all_sighashes_are_ordinary() {
         assert!(
             UnusualSighashType
                 .evaluate(&PolicyContext {
+                    wallet: None,
                     inspection: &input,
                     config: &PolicyConfig::default()
                 })
@@ -101,6 +103,7 @@ fn numeric_sighash_variants_require_review_regardless_of_name() {
             name: "\x1b[31mPRIVATE_SENTINEL".into(),
         });
         let result = UnusualSighashType.evaluate(&PolicyContext {
+            wallet: None,
             inspection: &input,
             config: &PolicyConfig::default(),
         });

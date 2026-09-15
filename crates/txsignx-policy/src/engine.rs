@@ -9,11 +9,18 @@ use txsignx_core::{
 /// they must be deterministic and must not perform I/O or mutate input.
 pub trait PolicyRule {
     fn metadata(&self) -> RuleMetadata;
+    fn evaluation(
+        &self,
+        _context: &PolicyContext<'_>,
+    ) -> (RuleEvaluationStatus, Option<RuleEvaluationReason>) {
+        (RuleEvaluationStatus::Evaluated, None)
+    }
     fn evaluate(&self, context: &PolicyContext<'_>) -> Vec<Finding>;
 }
 pub struct PolicyContext<'a> {
     pub inspection: &'a PsbtReport,
     pub config: &'a PolicyConfig,
+    pub wallet: Option<&'a txsignx_wallet::WalletContextReport>,
 }
 struct RegisteredRule {
     metadata: RuleMetadata,
@@ -50,13 +57,40 @@ impl PolicyEngine {
         inspection: &PsbtReport,
         config: &PolicyConfig,
     ) -> Result<PolicyReport, PolicyError> {
+        self.evaluate_with_wallet(inspection, config, None)
+    }
+    pub fn evaluate_with_wallet(
+        &self,
+        inspection: &PsbtReport,
+        config: &PolicyConfig,
+        wallet: Option<&txsignx_wallet::WalletContextReport>,
+    ) -> Result<PolicyReport, PolicyError> {
         config.validate()?;
+        if let Some(wallet) = wallet {
+            wallet
+                .validate_for(inspection)
+                .map_err(|_| PolicyError::InconsistentWalletContext)?;
+        }
         validate_inspection(inspection)?;
-        let context = PolicyContext { inspection, config };
+        let context = PolicyContext {
+            inspection,
+            config,
+            wallet,
+        };
         let mut findings = Vec::new();
         let mut evaluated_rules = Vec::new();
+        let mut rule_evaluations = Vec::new();
         for registered in &self.rules {
             if !registered.metadata.active {
+                continue;
+            }
+            let (status, reason) = registered.rule.evaluation(&context);
+            rule_evaluations.push(RuleEvaluation {
+                code: registered.metadata.code.to_owned(),
+                status,
+                reason,
+            });
+            if status == RuleEvaluationStatus::NotEvaluated {
                 continue;
             }
             let mut rule_findings = registered.rule.evaluate(&context);
@@ -91,8 +125,13 @@ impl PolicyEngine {
             finding_count: findings.len(),
             findings,
             evaluated_rules,
+            rule_evaluations,
             config: *config,
-            scope_note: POLICY_SCOPE,
+            scope_note: if wallet.is_some() {
+                WALLET_POLICY_SCOPE
+            } else {
+                POLICY_SCOPE
+            },
         })
     }
 }

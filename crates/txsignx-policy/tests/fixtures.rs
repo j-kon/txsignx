@@ -19,7 +19,11 @@ fn evaluate(text: &str) -> PreflightReport {
             json
         );
     }
-    PreflightReport { inspection, policy }
+    PreflightReport {
+        inspection,
+        wallet_context: None,
+        policy,
+    }
 }
 macro_rules! demo {
     ($test:ident,$file:literal,$decision:ident,$risk:ident,[$($code:literal),*])=>{

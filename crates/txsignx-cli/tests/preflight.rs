@@ -29,8 +29,8 @@ fn policy_list_human_and_json_come_from_registry() {
     let out = run(&["policy", "list", "--json"]);
     assert!(out.status.success());
     let catalog = json(&out);
-    assert_eq!(catalog["active_rules"].as_array().unwrap().len(), 8);
-    assert_eq!(catalog["deferred_rules"].as_array().unwrap().len(), 6);
+    assert_eq!(catalog["active_rules"].as_array().unwrap().len(), 10);
+    assert_eq!(catalog["deferred_rules"].as_array().unwrap().len(), 4);
 }
 #[test]
 fn pass_positional_human_reports_scope_and_development_thresholds() {

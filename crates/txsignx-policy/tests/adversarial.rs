@@ -20,6 +20,7 @@ fn boundary_grid_uses_strict_integer_fee_share_without_rounding() {
                 assert_eq!(
                     !ExcessiveFeePercentage
                         .evaluate(&PolicyContext {
+                            wallet: None,
                             inspection: &input,
                             config: &config
                         })
