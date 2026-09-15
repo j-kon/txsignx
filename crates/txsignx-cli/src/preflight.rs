@@ -26,7 +26,7 @@ pub struct PreflightArgs {
     max_fee_ratio_bps: u16,
 }
 
-pub fn run(args: PreflightArgs) -> Result<ExitCode, Box<dyn Error>> {
+pub fn run(args: PreflightArgs, broadcast: bool) -> Result<ExitCode, Box<dyn Error>> {
     let config = PolicyConfig {
         max_absolute_fee_sats: args.max_absolute_fee_sats,
         max_fee_ratio_bps: args.max_fee_ratio_bps,
@@ -56,12 +56,29 @@ pub fn run(args: PreflightArgs) -> Result<ExitCode, Box<dyn Error>> {
                 .map_err(Into::into)
         })
         .transpose()?;
-    let policy = PolicyEngine::development()?.evaluate_with_context(
+    let mut policy = PolicyEngine::development()?.evaluate_with_context(
         &inspection,
         &config,
         wallet_context.as_ref(),
         node_context.as_ref(),
     )?;
+    let broadcast_txid = if broadcast {
+        let rpc = rpc
+            .as_ref()
+            .ok_or("broadcast requires node RPC configuration")?;
+        let outcome = txsignx_cli::broadcast::execute(
+            rpc,
+            &text,
+            &inspection,
+            wallet_context.as_ref(),
+            node_context.as_ref(),
+            &config,
+        )?;
+        policy = outcome.policy;
+        outcome.txid
+    } else {
+        None
+    };
     let decision = policy.decision;
     let report = PreflightReport {
         inspection,
@@ -71,10 +88,17 @@ pub fn run(args: PreflightArgs) -> Result<ExitCode, Box<dyn Error>> {
     };
     let mut stdout = BufWriter::new(io::stdout().lock());
     if args.json {
-        serde_json::to_writer_pretty(&mut stdout, &report)?;
+        let mut value = serde_json::to_value(&report)?;
+        if let Some(txid) = broadcast_txid {
+            value["broadcast"] = serde_json::json!({"network":"regtest", "txid":txid});
+        }
+        serde_json::to_writer_pretty(&mut stdout, &value)?;
         writeln!(stdout)?;
     } else {
         write_report(&mut stdout, &report)?;
+        if let Some(txid) = broadcast_txid {
+            writeln!(stdout, "\nBroadcast accepted on Regtest\nTXID: {txid}")?;
+        }
     }
     stdout.flush()?;
     Ok(ExitCode::from(match decision {
