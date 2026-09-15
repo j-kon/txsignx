@@ -8,6 +8,8 @@ use clap::{Parser, Subcommand};
 use txsignx_core::{analyze_psbt, analyze_transaction};
 
 mod display;
+mod node_display;
+mod node_input;
 mod preflight;
 mod psbt_display;
 mod psbt_input;

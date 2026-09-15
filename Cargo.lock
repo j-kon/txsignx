@@ -596,9 +596,12 @@ dependencies = [
 name = "txsignx-cli"
 version = "0.1.0"
 dependencies = [
+ "bitcoin",
  "clap",
+ "serde",
  "serde_json",
  "txsignx-core",
+ "txsignx-node",
  "txsignx-policy",
  "txsignx-wallet",
 ]

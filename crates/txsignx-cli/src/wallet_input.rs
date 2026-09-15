@@ -18,7 +18,7 @@ pub struct WalletArgs {
     internal_descriptor_file: Option<PathBuf>,
     /// Explicit configured network: bitcoin (alias mainnet), testnet, testnet4, signet, regtest.
     #[arg(long)]
-    network: Option<String>,
+    pub network: Option<String>,
     /// Derive indexes 0..COUNT. Default 1000; allowed 1..=10000.
     #[arg(long, value_name = "COUNT")]
     derivation_window: Option<u32>,
@@ -44,14 +44,14 @@ impl fmt::Display for InputError {
 impl Error for InputError {}
 impl WalletArgs {
     /// Validate the entire wallet option group before opening PSBT files/stdin.
-    pub fn config(&self) -> Result<Option<WalletConfig>, Box<dyn Error>> {
+    pub fn config(&self, node_enabled: bool) -> Result<Option<WalletConfig>, Box<dyn Error>> {
         let external =
             self.external_descriptor.is_some() || self.external_descriptor_file.is_some();
         let internal =
             self.internal_descriptor.is_some() || self.internal_descriptor_file.is_some();
         let enabled = external
             || internal
-            || self.network.is_some()
+            || (self.network.is_some() && !node_enabled)
             || self.derivation_window.is_some()
             || !self.expected_change_output.is_empty();
         if !enabled {
