@@ -1,0 +1,16 @@
+[package]
+name = "txsignx-node"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+bitcoin.workspace = true
+bitcoincore-rpc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+txsignx-core.workspace = true
+# Already required transitively by jsonrpc; direct access disables redirects and bounds reads.
+minreq = { version = "=2.14.1", default-features = false }
