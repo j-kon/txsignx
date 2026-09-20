@@ -152,3 +152,34 @@ fn deterministic_report_and_input_limits() {
     r.input_count = r.inputs.len();
     assert!(build_node_context(&f, &r, Network::Regtest).is_err());
 }
+#[test]
+fn stale_bestblock_in_utxo_never_escapes_as_complete_context() {
+    let mut f = Fake::new();
+    f.chain.as_mut().unwrap().best_block = hash(7);
+    assert_eq!(
+        build_node_context(&f, &inspection(), Network::Regtest).unwrap_err(),
+        NodeError::UnstableChainTip
+    );
+    assert_eq!(f.attempts.get(), 3);
+}
+#[test]
+fn duplicate_and_reordered_inputs_are_rejected() {
+    let mut r = inspection();
+    r.inputs.push(r.inputs[0].clone());
+    r.inputs[1].index = 1;
+    r.input_count = 2;
+    assert_eq!(
+        build_node_context(&Fake::new(), &r, Network::Regtest).unwrap_err(),
+        NodeError::InvalidInspection
+    );
+    r.inputs[0].index = 1;
+    assert!(build_node_context(&Fake::new(), &r, Network::Regtest).is_err());
+}
+#[test]
+fn malformed_resolved_script_fails_without_echo() {
+    let mut r = inspection();
+    r.inputs[0].utxo.script_pubkey_hex = Some("SECRET_MARKER".into());
+    let e = build_node_context(&Fake::new(), &r, Network::Regtest).unwrap_err();
+    assert_eq!(e, NodeError::InvalidInspection);
+    assert!(!e.to_string().contains("SECRET_MARKER"));
+}

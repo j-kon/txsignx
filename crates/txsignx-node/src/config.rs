@@ -55,3 +55,44 @@ pub(crate) fn cookie(path: &Path) -> Result<String, NodeError> {
     }
     Ok(text.to_owned())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    fn check(bytes: &[u8]) -> Result<String, NodeError> {
+        let p = std::env::temp_dir().join(format!(
+            "txsignx-m5-cookie-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&p)
+            .unwrap();
+        std::io::Write::write_all(&mut f, bytes).unwrap();
+        let r = cookie(&p);
+        std::fs::remove_file(p).unwrap();
+        r
+    }
+    #[test]
+    fn cookie_format_and_size_are_bounded() {
+        for b in [
+            b"".to_vec(),
+            b"arbitrary:marker".to_vec(),
+            b"__cookie__:".to_vec(),
+            b"__cookie__:line\nmarker".to_vec(),
+            vec![b'x'; 4097],
+            vec![255],
+        ] {
+            assert_eq!(check(&b), Err(NodeError::InvalidCookie));
+        }
+        assert!(check(b"__cookie__:synthetic-test-cookie\n").is_ok());
+    }
+    #[test]
+    fn directories_are_rejected_without_read() {
+        assert_eq!(cookie(&std::env::temp_dir()), Err(NodeError::InvalidCookie));
+    }
+}

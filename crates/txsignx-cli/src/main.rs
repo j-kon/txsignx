@@ -58,9 +58,9 @@ enum TransactionCommand {
 #[derive(Subcommand)]
 enum PsbtCommand {
     /// Evaluate deterministic development policy (exit 0 PASS, 2 REVIEW, 3 BLOCK).
-    Preflight(preflight::PreflightArgs),
+    Preflight(Box<preflight::PreflightArgs>),
     /// Broadcast an externally finalized PSBT only after Regtest wallet/node PASS gates.
-    Broadcast(preflight::PreflightArgs),
+    Broadcast(Box<preflight::PreflightArgs>),
     /// Inspect standard base64 PSBT v0 without modifying or signing it.
     Inspect {
         #[command(flatten)]
@@ -86,10 +86,10 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
         } => return preflight::list(json),
         Command::Psbt {
             command: PsbtCommand::Preflight(args),
-        } => return preflight::run(args, false),
+        } => return preflight::run(*args, false),
         Command::Psbt {
             command: PsbtCommand::Broadcast(args),
-        } => return preflight::run(args, true),
+        } => return preflight::run(*args, true),
         Command::Psbt {
             command: PsbtCommand::Inspect { source, json },
         } => {

@@ -155,18 +155,15 @@ fn observe(
                 return Err(NodeError::InconsistentObservation);
             }
         }
-        if let Some(c) = &chain {
-            if c.confirmations == 0 {
-                return Err(NodeError::InconsistentObservation);
-            }
+        if chain.as_ref().is_some_and(|c| c.confirmations == 0) {
+            return Err(NodeError::InconsistentObservation);
         }
-        if let (Some(c), Some(m)) = (&chain, &mempool) {
-            if c.output != m.output
+        if let (Some(c), Some(m)) = (&chain, &mempool)
+            && (c.output != m.output
                 || c.confirmations != m.confirmations
-                || c.coinbase != m.coinbase
-            {
-                return Err(NodeError::InconsistentObservation);
-            }
+                || c.coinbase != m.coinbase)
+        {
+            return Err(NodeError::InconsistentObservation);
         }
         if chain.is_none()
             && mempool

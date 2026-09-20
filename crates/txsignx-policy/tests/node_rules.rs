@@ -109,3 +109,45 @@ fn policy_rejects_stale_node_context() {
         PolicyError::InconsistentNodeContext
     );
 }
+#[test]
+fn missing_psbt_context_leaves_prevout_rule_skipped() {
+    let r = txsignx_core::analyze_psbt(include_str!("../../../fixtures/policy/missing-utxo.b64"))
+        .unwrap();
+    let n = build_node_context(&Fake::new(), &r, Network::Regtest).unwrap();
+    let p = PolicyEngine::development()
+        .unwrap()
+        .evaluate_with_context(&r, &PolicyConfig::default(), None, Some(&n))
+        .unwrap();
+    assert_eq!(p.decision, PolicyDecision::Review);
+    assert_eq!(
+        p.rule_evaluations
+            .iter()
+            .find(|e| e.code == "TG016")
+            .unwrap()
+            .status,
+        RuleEvaluationStatus::NotEvaluated
+    );
+    assert!(p.findings.iter().any(|f| f.code == "TG010"));
+}
+#[test]
+fn mixed_missing_prevouts_are_partially_evaluated() {
+    let mut p =
+        txsignx_core::psbt::decode_psbt(include_str!("../../../fixtures/policy/pass.b64")).unwrap();
+    p.unsigned_tx.input.push(p.unsigned_tx.input[0].clone());
+    p.unsigned_tx.input[1].previous_output.vout += 1;
+    p.inputs.push(Default::default());
+    let r = txsignx_core::analyze_psbt(&p.to_string()).unwrap();
+    let n = build_node_context(&Fake::new(), &r, Network::Regtest).unwrap();
+    let p = PolicyEngine::development()
+        .unwrap()
+        .evaluate_with_context(&r, &PolicyConfig::default(), None, Some(&n))
+        .unwrap();
+    assert_eq!(
+        p.rule_evaluations
+            .iter()
+            .find(|e| e.code == "TG016")
+            .unwrap()
+            .status,
+        RuleEvaluationStatus::PartiallyEvaluated
+    );
+}

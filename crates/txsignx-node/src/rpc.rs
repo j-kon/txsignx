@@ -124,17 +124,19 @@ impl Wire {
         if bytes.len() > 1_048_576 {
             return Err(NodeError::Rpc);
         }
-        let response: serde_json::Value =
-            serde_json::from_slice(&bytes).map_err(|_| NodeError::Rpc)?;
-        if response.get("id") != Some(&serde_json::json!(1))
-            || response.get("jsonrpc") != Some(&serde_json::json!("2.0"))
-            || response.get("error").is_some_and(|e| !e.is_null())
-        {
-            return Err(NodeError::Rpc);
-        }
-        let result = response.get("result").ok_or(NodeError::Rpc)?;
-        serde_json::from_value(result.clone()).map_err(|_| NodeError::Rpc)
+        decode_response(&bytes)
     }
+}
+fn decode_response<T: for<'a> Deserialize<'a>>(bytes: &[u8]) -> Result<T, NodeError> {
+    let response: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| NodeError::Rpc)?;
+    if response.get("id") != Some(&serde_json::json!(1))
+        || response.get("jsonrpc") != Some(&serde_json::json!("2.0"))
+        || response.get("error").is_some_and(|e| !e.is_null())
+    {
+        return Err(NodeError::Rpc);
+    }
+    let result = response.get("result").ok_or(NodeError::Rpc)?;
+    serde_json::from_value(result.clone()).map_err(|_| NodeError::Rpc)
 }
 #[derive(Deserialize)]
 struct ChainResponse {
@@ -193,17 +195,7 @@ impl NodeRpc for BitcoinCoreRpc {
             .wire
             .test_mempool_accept(&[tx])
             .map_err(|_| NodeError::Rpc)?;
-        if r.len() != 1 {
-            return Err(NodeError::Rpc);
-        }
-        let item = r.first().ok_or(NodeError::Rpc)?;
-        if item.txid != tx.compute_txid() {
-            return Err(NodeError::Rpc);
-        }
-        Ok(MempoolAcceptance {
-            txid: item.txid,
-            allowed: item.allowed,
-        })
+        acceptance(tx, r)
     }
     fn send_raw_transaction(&self, tx: &Transaction) -> Result<Txid, NodeError> {
         let id = self
@@ -216,8 +208,65 @@ impl NodeRpc for BitcoinCoreRpc {
         Ok(id)
     }
 }
+fn acceptance(
+    tx: &Transaction,
+    r: Vec<bitcoincore_rpc::json::TestMempoolAcceptResult>,
+) -> Result<MempoolAcceptance, NodeError> {
+    if r.len() != 1 {
+        return Err(NodeError::Rpc);
+    }
+    let item = r.first().ok_or(NodeError::Rpc)?;
+    if item.txid != tx.compute_txid() {
+        return Err(NodeError::Rpc);
+    }
+    Ok(MempoolAcceptance {
+        txid: item.txid,
+        allowed: item.allowed,
+    })
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NodeChainTip {
     pub height: u64,
     pub hash: BlockHash,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn malformed_response_envelopes_fail_without_echo() {
+        for bytes in [
+            b"not json".as_slice(),
+            br#"{"jsonrpc":"2.0","id":2,"result":1}"#,
+            br#"{"jsonrpc":"2.0","id":1,"error":{"message":"SECRET_MARKER"}}"#,
+            br#"{"jsonrpc":"2.0","id":1}"#,
+        ] {
+            assert_eq!(decode_response::<u64>(bytes), Err(NodeError::Rpc));
+        }
+        assert_eq!(
+            decode_response::<u64>(br#"{"jsonrpc":"2.0","id":1,"result":4}"#),
+            Ok(4)
+        );
+    }
+    #[test]
+    fn typed_response_rejects_negative_or_excess_confirmations() {
+        for count in [serde_json::json!(-1), serde_json::json!(4294967296u64)] {
+            let v = serde_json::json!({"bestblock":"00".repeat(32),"confirmations":count,"value":1.0,"scriptPubKey":{"asm":"","hex":"","type":"nonstandard"},"coinbase":false});
+            assert!(serde_json::from_value::<bitcoincore_rpc::json::GetTxOutResult>(v).is_err());
+        }
+    }
+    #[test]
+    fn acceptance_requires_exactly_one_matching_candidate() {
+        let tx = txsignx_core::psbt::decode_psbt(include_str!("../../../fixtures/policy/pass.b64"))
+            .unwrap()
+            .unsigned_tx;
+        for json in [
+            serde_json::json!([]),
+            serde_json::json!([{"txid":"00".repeat(32),"allowed":true}]),
+            serde_json::json!([{"txid":tx.compute_txid(),"allowed":true},{"txid":tx.compute_txid(),"allowed":true}]),
+        ] {
+            let items = serde_json::from_value(json).unwrap();
+            assert_eq!(acceptance(&tx, items), Err(NodeError::Rpc));
+        }
+    }
 }
