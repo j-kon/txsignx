@@ -7,8 +7,8 @@ Bitcoin transaction security before signing.
 TxSignX is an open-source Bitcoin transaction and PSBT security preflight engine
 written in Rust. Milestone 1 implements raw-transaction inspection; Milestone 2
 adds PSBT v0 inspection; Milestone 3 adds deterministic development policy
-evaluation; Milestone 4 adds bounded public-descriptor wallet context. Node-backed
-chain context remains a later milestone.
+evaluation; Milestone 4 adds bounded public-descriptor wallet context. Milestone 5
+adds Bitcoin Core chain context and strictly gated Regtest broadcast.
 
 > TxSignX is under active development and is currently intended for development and Regtest testing. Do not rely on it to protect real Bitcoin funds.
 
@@ -108,7 +108,7 @@ identifier. The analyzer does not infer a network or generate addresses.
 omit their values. Output totals alone cannot establish a fee or feerate.
 Human output states `Fee: unavailable without prevout context`; JSON uses
 `fee_sats: null`. PSBT inspection can use supplied prevout information for an absolute fee.
-Wallet UTXOs and Bitcoin Core context remain future work.
+Node-aware preflight can additionally compare supplied prevouts with Bitcoin Core.
 
 **Explicit RBF only.** Under [BIP125](https://bips.dev/125/), an input signals
 explicitly when `nSequence < 0xfffffffe`; the transaction signals if any input
@@ -137,14 +137,14 @@ consensus parser. Output totals use checked addition and reject `u64` overflow.
 consensus validity, standardness, correct signatures, available UTXOs, valid
 amount ranges, finality, wallet ownership, absence of double spending, or safety
 to sign. In particular, decoded amounts can exceed Bitcoin's money supply;
-Milestone 1 reports them without claiming monetary validity. There is no script
+Milestone 1 reports them without claiming monetary validity. Raw inspection has no script
 execution, signing, private-key handling, live RPC, wallet, database, server,
 or web integration. Raw inspection derives facts; policy evaluation is separate.
 
 Raw scripts and witness data can contain identifying or sensitive data. The
 requested report reproduces those bytes as hex. Review reports before sharing;
 command-line arguments may also be visible in shell history or process listings.
-TxSignX adds no transaction logging or network transmission. This milestone has
+Raw inspection adds no transaction logging or network transmission. This milestone has
 received implementation review and automated tests, not a professional audit.
 
 ## Milestone 2 — PSBT inspection
@@ -404,17 +404,13 @@ facts; they do not reproduce arbitrary script/metadata text.
 
 | Reserved code | Deferred rule | Required context |
 |---|---|---|
-| TG001 | Wrong Network | Explicit expected network / wallet context |
-| TG006 | Immature Coinbase Input | Confirmations / chain height |
 | TG007 | Dust Output | Explicit relay/dust assumptions or node policy |
 | TG008 | Address Reuse | Wallet address/history |
 
-These four rules remain deferred. Milestone 4 adds TG004/TG005 only when the
-required caller-provided wallet context is available. Without it, wallet inputs
-and expected change remain unchecked. Configured network does not establish
-network truth. Confirmations, address reuse, coinbase maturity, mempool context
-and cryptographic signatures remain unverified. No signing, finalization,
-broadcasting or node integration is added.
+TG007/TG008 remain deferred. Wallet rules require supplied wallet context; node
+rules require explicit node context. Without those contexts, the corresponding
+checks remain unevaluated. A configured network alone does not establish node
+network agreement. Preflight never signs, finalizes or broadcasts.
 
 The [public dummy policy fixtures](fixtures/policy/README.md) cover PASS, REVIEW,
 BLOCK and evaluation errors. Run the capstone example:
@@ -496,7 +492,8 @@ There is no arbitrary external/internal preference.
 `--network` accepts `bitcoin` (alias `mainnet`), `testnet`, `testnet4`, `signet`,
 `regtest`. JSON emits the canonical configured name. BDK checks extended-key
 main/test compatibility. Test-family prefixes do not distinguish their networks.
-Neither PSBT nor script supplies a detected network; TG001 remains deferred.
+Neither PSBT nor script supplies a detected network. TG001 compares the explicit
+configuration with Core's reported chain only when node context is requested.
 
 `--derivation-window COUNT` defaults to **1000**, permits **1..=10000**, and derives
 exactly indexes `0..COUNT` on each keychain: 999 is included at 1000; 1000 is not.
@@ -527,7 +524,7 @@ Ordinary recipient outputs need not match the wallet and are not TG005 findings.
 
 TG004 does not duplicate missing TG010 or invalid TG009 context findings.
 Foreign inputs can be legitimate in Payjoin/CoinJoin/multi-party transactions.
-There are **10 active rules and 4 deferred rules** (TG001/TG006/TG007/TG008).
+The current registry has **15 active rules and 2 deferred rules** (TG007/TG008).
 
 Wallet-aware JSON adds `wallet_context` alongside `inspection` and `policy`.
 It includes `configured_network`, `derivation_window`, sorted
@@ -558,11 +555,117 @@ scope and evaluation statuses. It never implies that skipped wallet checks,
 network truth or chain state were verified. Human output displays the same
 classifications, explicit change markers and evaluation statuses.
 
-No signing, finalization, broadcast, network I/O, RPC, persistence, balances,
-wallet history or chain synchronization is implemented. Milestone 5 will address
-node-backed chain context separately. This is not a professional security audit.
+The wallet crate adds no signing, finalization, broadcast, network I/O, RPC,
+persistence, balances, wallet history or chain synchronization. The separate
+Milestone 5 node/CLI components provide the capabilities below. This is not a
+professional security audit.
 See [design](docs/milestone-4-plan.md) and
 [verification](docs/milestone-4-verification.md).
+
+## Milestone 5 — Bitcoin Core chain context
+
+`txsignx-node` depends on core and the reviewed Bitcoin Core RPC client; policy
+and wallet never perform RPC. Policy consumes immutable node reports bound to
+the inspected transaction, ordered inputs/outputs and resolved prevout facts.
+Bitcoin Core is the explicitly selected chain-state authority: these are
+node-reported observations, not independent consensus proofs.
+
+```sh
+txsignx psbt preflight --file payment.psbt --network regtest \
+  --rpc-url http://127.0.0.1:28443 --rpc-cookie-file /task/regtest/.cookie --json
+```
+
+Node mode requires URL, cookie file and explicit network together. Descriptors
+are optional for preflight; wallet and node configuration share one `--network`.
+Core chain names `main`, `test`, `testnet4`, `signet`, `regtest` map to `bitcoin`,
+`testnet`, `testnet4`, `signet`, `regtest`. No PSBT network is inferred.
+
+Only exact `http://127.0.0.1:PORT` and `http://[::1]:PORT` endpoints are accepted,
+with a canonical nonzero decimal port. DNS names, remote IPs, HTTPS, credentials,
+paths, queries and fragments are rejected. Redirects and proxy features are
+disabled. Cookie authentication requires a readable regular file, at most
+4096 bytes, and never enters reports, errors or Debug output. There are no RPC
+username/password flags. Transport reads have a five-second timeout, 8 KiB
+headers, 1 KiB status line and 1 MiB response-body limits.
+
+Readiness rejects IBD, unsupported chains, inconsistent readiness fields and
+any header/block height gap. Node mode permits at most 256 inputs (a stricter
+application bound than offline PSBT parsing). Each attempt records the starting
+tip, queries every input with `gettxout(false)` and `gettxout(true)`, validates
+returned bestblock/confirmations, then checks hash/height/hash again. Tip changes
+retry the complete build, with at most three attempts and no partial report.
+
+| Chain-only / mempool-aware | Availability |
+|---|---|
+| Found / found | Confirmed unspent |
+| Absent / found | Mempool unconfirmed |
+| Found / absent | Spent in mempool |
+| Absent / absent | Not available in the queried node views |
+
+Unavailable does not establish that an output never existed. Mempool observations
+are not atomic and can change after inspection. Conflicting node values/scripts
+are errors. Available node prevouts are compared using integer satoshis and
+scripts against core's resolved PSBT facts; missing/invalid PSBT metadata is
+never repaired, and TG009/TG010 remain effective.
+
+| Rule | Trigger | Result |
+|---|---|---|
+| TG001 | Configured network differs from Core chain | CRITICAL / BLOCK |
+| TG006 | Core reports coinbase with fewer than 100 confirmations | CRITICAL / BLOCK |
+| TG015 | Outpoint absent from both queried views | CRITICAL / BLOCK |
+| TG016 | PSBT/Core prevout value, script, or both disagree | CRITICAL / BLOCK |
+| TG017 | Chain output absent from mempool-aware view | HIGH / REVIEW |
+
+TG017 may describe an intentional replacement workflow. Without node context all
+five rules are `not_evaluated`. TG006 counts available coinbase/confirmation
+facts; TG016 counts comparable prevouts: all usable is `evaluated`, some usable
+is `partially_evaluated`, none usable is `not_evaluated`. TG001/TG015/TG017 are
+fully evaluated for complete node reports. Existing no-node decisions and exit
+codes remain unchanged. JSON adds optional `node_context` with network, tip and
+ordered input classifications; it excludes RPC credentials and raw responses.
+
+### Regtest-only broadcast
+
+```sh
+txsignx psbt broadcast --file externally-finalized.psbt \
+  --external-descriptor-file receive.desc --internal-descriptor-file change.desc \
+  --expected-change-output 1 --network regtest \
+  --rpc-url http://127.0.0.1:28443 --rpc-cookie-file /task/regtest/.cookie --json
+```
+
+Broadcast requires full wallet/node context, explicit expected change, all
+required wallet/node rules fully evaluated, and recomputed policy PASS. REVIEW
+returns 2 and BLOCK returns 3 before acceptance or send calls. Every input must
+contain final script data appropriate to its prevout, followed by checked
+rust-bitcoin extraction. TxSignX never adds signatures or finalizes a PSBT.
+Core must return exactly one matching, allowed `testmempoolaccept` result before
+`sendrawtransaction`. The connected network and tip are rechecked immediately
+before acceptance and sending; observed changes fail closed. RPC observations
+and sending cannot form an atomic chain/mempool transaction.
+
+Success returns exit 0 and a Regtest TXID accepted for mempool/broadcast processing,
+not confirmation. Configuration, readiness, extraction and acceptance errors
+return 1. No override bypasses PASS; no mainnet, testnet, testnet4 or signet
+broadcast is supported. Transactions intentionally without change are outside
+this broadcast interface.
+
+### Isolated real-node verification
+
+Build the CLI, then explicitly run `python3 scripts/verify-regtest.py`. Set
+`BITCOIND`, `BITCOIN_CLI` and optionally `TXSIGNX` to executable paths when needed
+(Homebrew defaults are provided). Standard `cargo test` uses deterministic fakes
+and does not require a node. The opt-in harness always supplies `-regtest` and a
+fresh task-created temporary datadir, non-default loopback ports and disabled
+public-peer networking. It prints the safeguards before startup, uses cookie
+auth, and constructs/signs/finalizes synthetic fixtures in its own temporary
+Core wallet outside production TxSignX. It verifies node shutdown, reports size,
+removes only its own datadir and verifies removal. It never uses user Bitcoin
+data or downloads a public blockchain.
+
+No persistent wallet/database, full wallet sync, balance/history service,
+Electrum/Esplora or Milestone 6 functionality is introduced. See the
+[Milestone 5 plan](docs/milestone-5-plan.md) and
+[verification record](docs/milestone-5-verification.md).
 
 ## Development verification
 

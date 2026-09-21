@@ -13,6 +13,8 @@ pub struct PreflightArgs {
     source: PsbtSource,
     #[command(flatten)]
     wallet: crate::wallet_input::WalletArgs,
+    #[command(flatten)]
+    node: crate::node_input::NodeArgs,
     /// Emit inspection and policy JSON before returning the decision exit code.
     #[arg(long)]
     json: bool,
@@ -24,14 +26,15 @@ pub struct PreflightArgs {
     max_fee_ratio_bps: u16,
 }
 
-pub fn run(args: PreflightArgs) -> Result<ExitCode, Box<dyn Error>> {
+pub fn run(args: PreflightArgs, broadcast: bool) -> Result<ExitCode, Box<dyn Error>> {
     let config = PolicyConfig {
         max_absolute_fee_sats: args.max_absolute_fee_sats,
         max_fee_ratio_bps: args.max_fee_ratio_bps,
     };
     // Reject invalid configuration before reading files or blocking on stdin.
     config.validate()?;
-    let wallet_config = args.wallet.config()?;
+    let rpc = args.node.client(args.wallet.network.as_deref())?;
+    let wallet_config = args.wallet.config(args.node.enabled())?;
     let text = psbt_input::read(args.source)?;
     let inspection = txsignx_core::analyze_psbt(&text)?;
     let wallet_context = wallet_config
@@ -40,23 +43,62 @@ pub fn run(args: PreflightArgs) -> Result<ExitCode, Box<dyn Error>> {
                 .classify(&inspection, &args.wallet.expected_change_output)
         })
         .transpose()?;
-    let policy = PolicyEngine::development()?.evaluate_with_wallet(
+    let node_context = rpc
+        .as_ref()
+        .map(|rpc| -> Result<_, Box<dyn Error>> {
+            let network: txsignx_wallet::ConfiguredNetwork = args
+                .wallet
+                .network
+                .as_deref()
+                .ok_or("node network required")?
+                .parse()?;
+            txsignx_node::build_node_context(rpc, &inspection, network.bitcoin_network())
+                .map_err(Into::into)
+        })
+        .transpose()?;
+    let mut policy = PolicyEngine::development()?.evaluate_with_context(
         &inspection,
         &config,
         wallet_context.as_ref(),
+        node_context.as_ref(),
     )?;
+    let broadcast_txid = if broadcast {
+        let rpc = rpc
+            .as_ref()
+            .ok_or("broadcast requires node RPC configuration")?;
+        let outcome = txsignx_cli::broadcast::execute(
+            rpc,
+            &text,
+            &inspection,
+            wallet_context.as_ref(),
+            node_context.as_ref(),
+            &config,
+        )?;
+        policy = outcome.policy;
+        outcome.txid
+    } else {
+        None
+    };
     let decision = policy.decision;
     let report = PreflightReport {
         inspection,
         wallet_context,
+        node_context,
         policy,
     };
     let mut stdout = BufWriter::new(io::stdout().lock());
     if args.json {
-        serde_json::to_writer_pretty(&mut stdout, &report)?;
+        let mut value = serde_json::to_value(&report)?;
+        if let Some(txid) = broadcast_txid {
+            value["broadcast"] = serde_json::json!({"network":"regtest", "txid":txid});
+        }
+        serde_json::to_writer_pretty(&mut stdout, &value)?;
         writeln!(stdout)?;
     } else {
         write_report(&mut stdout, &report)?;
+        if let Some(txid) = broadcast_txid {
+            writeln!(stdout, "\nBroadcast accepted on Regtest\nTXID: {txid}")?;
+        }
     }
     stdout.flush()?;
     Ok(ExitCode::from(match decision {
@@ -115,6 +157,9 @@ fn write_report(out: &mut impl Write, report: &PreflightReport) -> io::Result<()
     )?;
     if let Some(wallet) = &report.wallet_context {
         crate::wallet_display::write_report(out, wallet)?;
+    }
+    if let Some(node) = &report.node_context {
+        crate::node_display::write_report(out, node)?;
     }
     writeln!(out, "\nRule evaluations")?;
     for evaluation in &report.policy.rule_evaluations {

@@ -21,6 +21,7 @@ pub struct PolicyContext<'a> {
     pub inspection: &'a PsbtReport,
     pub config: &'a PolicyConfig,
     pub wallet: Option<&'a txsignx_wallet::WalletContextReport>,
+    pub node: Option<&'a txsignx_node::NodeContextReport>,
 }
 struct RegisteredRule {
     metadata: RuleMetadata,
@@ -65,7 +66,25 @@ impl PolicyEngine {
         config: &PolicyConfig,
         wallet: Option<&txsignx_wallet::WalletContextReport>,
     ) -> Result<PolicyReport, PolicyError> {
+        self.evaluate_with_context(inspection, config, wallet, None)
+    }
+    pub fn evaluate_with_context(
+        &self,
+        inspection: &PsbtReport,
+        config: &PolicyConfig,
+        wallet: Option<&txsignx_wallet::WalletContextReport>,
+        node: Option<&txsignx_node::NodeContextReport>,
+    ) -> Result<PolicyReport, PolicyError> {
         config.validate()?;
+        if let Some(node) = node {
+            node.validate_for(inspection)
+                .map_err(|_| PolicyError::InconsistentNodeContext)?;
+            if wallet.is_some_and(|w| {
+                w.configured_network().bitcoin_network() != node.configured_network()
+            }) {
+                return Err(PolicyError::InconsistentNodeContext);
+            }
+        }
         if let Some(wallet) = wallet {
             wallet
                 .validate_for(inspection)
@@ -76,6 +95,7 @@ impl PolicyEngine {
             inspection,
             config,
             wallet,
+            node,
         };
         let mut findings = Vec::new();
         let mut evaluated_rules = Vec::new();
@@ -127,7 +147,9 @@ impl PolicyEngine {
             evaluated_rules,
             rule_evaluations,
             config: *config,
-            scope_note: if wallet.is_some() {
+            scope_note: if node.is_some() {
+                NODE_POLICY_SCOPE
+            } else if wallet.is_some() {
                 WALLET_POLICY_SCOPE
             } else {
                 POLICY_SCOPE

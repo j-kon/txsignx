@@ -20,6 +20,7 @@ fn evaluate(
     };
     rule.evaluate(&PolicyContext {
         wallet: None,
+        node: None,
         inspection: &input,
         config: &config,
     })
@@ -177,6 +178,7 @@ fn unavailable_fee_never_fabricates_threshold_findings() {
             assert!(
                 rule.evaluate(&PolicyContext {
                     wallet: None,
+                    node: None,
                     inspection: &input,
                     config: &PolicyConfig::default()
                 })

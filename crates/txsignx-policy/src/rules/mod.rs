@@ -11,3 +11,6 @@ pub use scripts::{NonZeroOpReturnValue, UnrecognizedScriptType};
 
 mod wallet;
 pub use wallet::{UnknownChangeOutput, UnknownWalletInput};
+
+mod node;
+pub use node::NodeRule;
