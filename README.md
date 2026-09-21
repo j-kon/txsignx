@@ -137,14 +137,14 @@ consensus parser. Output totals use checked addition and reject `u64` overflow.
 consensus validity, standardness, correct signatures, available UTXOs, valid
 amount ranges, finality, wallet ownership, absence of double spending, or safety
 to sign. In particular, decoded amounts can exceed Bitcoin's money supply;
-Milestone 1 reports them without claiming monetary validity. There is no script
+Milestone 1 reports them without claiming monetary validity. Raw inspection has no script
 execution, signing, private-key handling, live RPC, wallet, database, server,
 or web integration. Raw inspection derives facts; policy evaluation is separate.
 
 Raw scripts and witness data can contain identifying or sensitive data. The
 requested report reproduces those bytes as hex. Review reports before sharing;
 command-line arguments may also be visible in shell history or process listings.
-TxSignX adds no transaction logging or network transmission. This milestone has
+Raw inspection adds no transaction logging or network transmission. This milestone has
 received implementation review and automated tests, not a professional audit.
 
 ## Milestone 2 — PSBT inspection
@@ -664,7 +664,8 @@ data or downloads a public blockchain.
 
 No persistent wallet/database, full wallet sync, balance/history service,
 Electrum/Esplora or Milestone 6 functionality is introduced. See the
-[Milestone 5 plan](docs/milestone-5-plan.md).
+[Milestone 5 plan](docs/milestone-5-plan.md) and
+[verification record](docs/milestone-5-verification.md).
 
 ## Development verification
 
