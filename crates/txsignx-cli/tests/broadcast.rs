@@ -11,13 +11,18 @@ struct Fake {
     network: Network,
     allow: bool,
     wrong_id: bool,
+    switch_after_acceptance: bool,
     test: Cell<usize>,
     send: Cell<usize>,
 }
 impl NodeRpc for Fake {
     fn blockchain_info(&self) -> Result<BlockchainInfo, NodeError> {
         Ok(BlockchainInfo {
-            network: self.network,
+            network: if self.switch_after_acceptance && self.test.get() > 0 {
+                Network::Bitcoin
+            } else {
+                self.network
+            },
             blocks: 200,
             headers: 200,
             best_block_hash: BlockHash::all_zeros(),
@@ -91,6 +96,7 @@ fn setup(text: &str) -> Fake {
         network: Network::Regtest,
         allow: true,
         wrong_id: false,
+        switch_after_acceptance: false,
         test: Cell::new(0),
         send: Cell::new(0),
     }
@@ -143,6 +149,35 @@ fn pass_finalized_candidate_calls_acceptance_then_send() {
     assert!(o.txid.is_some());
     assert_eq!(f.test.get(), 1);
     assert_eq!(f.send.get(), 1);
+}
+#[test]
+fn a_changed_rpc_network_cannot_reuse_a_regtest_report() {
+    let text = finalized();
+    let mut f = setup(&text);
+    let r = txsignx_core::analyze_psbt(&text).unwrap();
+    let w = wallet(&r, &[1]);
+    let n = build_node_context(&f, &r, Network::Regtest).unwrap();
+    f.network = Network::Bitcoin;
+    assert!(
+        txsignx_cli::broadcast::execute(
+            &f,
+            &text,
+            &r,
+            Some(&w),
+            Some(&n),
+            &PolicyConfig::default()
+        )
+        .is_err()
+    );
+    assert_eq!((f.test.get(), f.send.get()), (0, 0));
+}
+#[test]
+fn network_change_after_acceptance_prevents_send() {
+    let text = finalized();
+    let mut f = setup(&text);
+    f.switch_after_acceptance = true;
+    assert!(execute(&text, &f, &[1], true).is_err());
+    assert_eq!((f.test.get(), f.send.get()), (1, 0));
 }
 #[test]
 fn unfinished_psbt_never_calls_acceptance_or_send() {

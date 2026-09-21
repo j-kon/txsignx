@@ -76,10 +76,12 @@ pub fn execute(
         }
     }
     let tx = psbt.extract_tx().map_err(|_| NodeError::Extraction)?;
+    require_current_regtest(rpc, node)?;
     let acceptance = rpc.test_mempool_accept(&tx)?;
     if acceptance.txid != tx.compute_txid() || !acceptance.allowed {
         return Err(NodeError::MempoolRejected.into());
     }
+    require_current_regtest(rpc, node)?;
     let txid = rpc.send_raw_transaction(&tx)?;
     if txid != tx.compute_txid() {
         return Err(NodeError::Rpc.into());
@@ -88,4 +90,20 @@ pub fn execute(
         policy,
         txid: Some(txid),
     })
+}
+
+fn require_current_regtest(rpc: &impl NodeRpc, node: &NodeContextReport) -> Result<(), NodeError> {
+    let current = rpc.blockchain_info()?;
+    if current.network != Network::Regtest
+        || current.initial_block_download
+        || current.headers != current.blocks
+        || current.blocks != node.tip().height
+        || current.best_block_hash != node.tip().hash
+        || current
+            .verification_progress
+            .is_some_and(|p| !p.is_finite() || !(0.0..=1.0).contains(&p))
+    {
+        return Err(NodeError::ContextMismatch);
+    }
+    Ok(())
 }
