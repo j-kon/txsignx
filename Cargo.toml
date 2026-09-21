@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/txsignx-core", "crates/txsignx-node", "crates/txsignx-wallet", "crates/txsignx-policy", "crates/txsignx-cli"]
+members = ["crates/txsignx-core", "crates/txsignx-node", "crates/txsignx-wallet", "crates/txsignx-policy", "crates/txsignx-cli", "crates/txsignx-api"]
 resolver = "3"
 
 [workspace.package]
