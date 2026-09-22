@@ -7,6 +7,7 @@ use std::{
 use clap::{Parser, Subcommand};
 use txsignx_core::{analyze_psbt, analyze_transaction};
 
+mod banner;
 mod display;
 mod node_display;
 mod node_input;
@@ -20,7 +21,7 @@ mod wallet_input;
 #[command(name = "txsignx", version, about = "Bitcoin transaction security before signing.", color = clap::ColorChoice::Never)]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -80,7 +81,17 @@ enum PolicyCommand {
 }
 
 fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
-    match cli.command {
+    let Some(command) = cli.command else {
+        let mut stdout = BufWriter::new(io::stdout().lock());
+        banner::write_banner(
+            &mut stdout,
+            banner::should_use_color(),
+            env!("CARGO_PKG_VERSION"),
+        )?;
+        stdout.flush()?;
+        return Ok(ExitCode::SUCCESS);
+    };
+    match command {
         Command::Policy {
             command: PolicyCommand::List { json },
         } => return preflight::list(json),
