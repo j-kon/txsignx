@@ -116,11 +116,11 @@ fn regtest_live_transaction_inspection_and_prevout_resolution() {
     let started = Instant::now();
     let mut ready = false;
     while started.elapsed() < Duration::from_secs(10) {
-        if let Ok(info_json) = cli_cmd(&["getblockchaininfo"]) {
-            if info_json.contains("\"chain\": \"regtest\"") {
-                ready = true;
-                break;
-            }
+        if let Ok(info_json) = cli_cmd(&["getblockchaininfo"])
+            && info_json.contains("\"chain\": \"regtest\"")
+        {
+            ready = true;
+            break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }

@@ -142,10 +142,10 @@ fn decode_response<T: for<'a> Deserialize<'a>>(bytes: &[u8]) -> Result<T, NodeEr
         return Err(NodeError::Rpc);
     }
     if let Some(err) = response.get("error").filter(|e| !e.is_null()) {
-        if let Some(code) = err.get("code").and_then(|c| c.as_i64()) {
-            if code == -5 {
-                return Err(NodeError::TransactionNotFound);
-            }
+        if let Some(code) = err.get("code").and_then(|c| c.as_i64())
+            && code == -5
+        {
+            return Err(NodeError::TransactionNotFound);
         }
         return Err(NodeError::Rpc);
     }

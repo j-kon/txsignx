@@ -119,10 +119,10 @@ pub fn write_human_report(out: &mut impl Write, report: &TransactionReport) -> i
             "    scriptSig ({} bytes): {}",
             input.script_sig_size_bytes, input.script_sig_hex
         )?;
-        if let Some(asm) = &input.script_sig_asm {
-            if !asm.is_empty() {
-                writeln!(out, "      scriptSig asm: {asm}")?;
-            }
+        if let Some(asm) = &input.script_sig_asm
+            && !asm.is_empty()
+        {
+            writeln!(out, "      scriptSig asm: {asm}")?;
         }
         writeln!(out, "    Witness items: {}", input.witness_item_count)?;
         for item in &input.witness_items {
@@ -152,10 +152,10 @@ pub fn write_human_report(out: &mut impl Write, report: &TransactionReport) -> i
             "    scriptPubKey ({} bytes): {}",
             output.script_pubkey_size_bytes, output.script_pubkey_hex
         )?;
-        if let Some(asm) = &output.script_pubkey_asm {
-            if !asm.is_empty() {
-                writeln!(out, "      scriptPubKey asm: {asm}")?;
-            }
+        if let Some(asm) = &output.script_pubkey_asm
+            && !asm.is_empty()
+        {
+            writeln!(out, "      scriptPubKey asm: {asm}")?;
         }
     }
     writeln!(

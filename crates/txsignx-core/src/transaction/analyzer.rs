@@ -91,10 +91,10 @@ pub fn analyze_decoded_transaction_with_context(
 
     let network = context.and_then(|c| c.network);
     let prevouts = context.and_then(|c| c.resolved_prevouts.as_ref());
-    if let Some(prevouts) = prevouts {
-        if prevouts.len() != transaction.input.len() {
-            return Err(AnalysisError::PrevoutCountMismatch);
-        }
+    if let Some(prevouts) = prevouts
+        && prevouts.len() != transaction.input.len()
+    {
+        return Err(AnalysisError::PrevoutCountMismatch);
     }
 
     let is_coinbase = transaction.is_coinbase();

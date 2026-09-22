@@ -45,6 +45,7 @@ cargo build -p txsignx-cli
 ./target/debug/txsignx --version
 ./target/debug/txsignx tx inspect <RAW_TX_HEX>
 ./target/debug/txsignx tx inspect <RAW_TX_HEX> --json
+./target/debug/txsignx tx inspect --txid <TXID> --node-url http://127.0.0.1:8332 --cookie-file ~/.bitcoin/.cookie --network regtest
 ```
 
 Replace `<RAW_TX_HEX>` with your transaction. Runnable examples using the checked-in
