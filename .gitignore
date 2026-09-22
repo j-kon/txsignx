@@ -25,3 +25,5 @@ txsignx-brand/
 .vscode/
 
 /target/
+__pycache__/
+*.py[cod]

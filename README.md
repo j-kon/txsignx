@@ -8,7 +8,8 @@ TxSignX is an open-source Bitcoin transaction and PSBT security preflight engine
 written in Rust. Milestone 1 implements raw-transaction inspection; Milestone 2
 adds PSBT v0 inspection; Milestone 3 adds deterministic development policy
 evaluation; Milestone 4 adds bounded public-descriptor wallet context. Milestone 5
-adds Bitcoin Core chain context and strictly gated Regtest broadcast.
+adds Bitcoin Core chain context and strictly gated Regtest broadcast. Milestone 6
+adds a local API and web presentation layer around the same Rust engine.
 
 > TxSignX is under active development and is currently intended for development and Regtest testing. Do not rely on it to protect real Bitcoin funds.
 
@@ -667,6 +668,128 @@ Electrum/Esplora or Milestone 6 functionality is introduced. See the
 [Milestone 5 plan](docs/milestone-5-plan.md) and
 [verification record](docs/milestone-5-verification.md).
 
+## Milestone 6 — Local API and web product
+
+`txsignx-api` exposes the existing Rust engine through a local Axum HTTP service.
+The React/TypeScript/Vite application in
+[txsignx-web](https://github.com/j-kon/txsignx-web) presents the returned facts,
+findings and evaluation coverage. Security decisions remain exclusively in
+`txsignx-policy`; the browser does not evaluate TG rules.
+
+```sh
+cargo run -p txsignx-api -- --bind 127.0.0.1:8080
+```
+
+In the web repository:
+
+```sh
+npm ci
+VITE_TXSIGNX_API_URL=http://127.0.0.1:8080 npm run dev -- --host 127.0.0.1
+```
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/v1/health` | Public service metadata |
+| `GET /api/v1/capabilities` | Supported operations, configuration and limits |
+| `GET /api/v1/policies` | Rust active/deferred registry |
+| `GET /api/v1/policies/{code}` | One rule or sanitized 404 |
+| `POST /api/v1/transactions/inspect` | `{ "raw_transaction": "HEX" }` |
+| `POST /api/v1/psbt/inspect` | `{ "psbt": "BASE64" }` |
+| `POST /api/v1/psbt/preflight` | PSBT, optional policy/wallet/configured-node context |
+
+Successful analysis returns the existing Rust report directly. Preflight decisions
+`pass`, `review` and `block` all return HTTP 200; HTTP errors describe failed
+analysis or transport, not policy decisions. Inspect `policy.rule_evaluations`
+for evaluated, partially evaluated and not evaluated rules. PASS means only that
+no evaluated active rule requires review or blocking. It is not permission to sign.
+
+```json
+{
+  "psbt": "BASE64",
+  "policy": { "max_absolute_fee_sats": 100000, "max_fee_ratio_bps": 1000 },
+  "wallet": {
+    "network": "regtest",
+    "external_descriptor": "PUBLIC_RANGED_RECEIVE_DESCRIPTOR",
+    "internal_descriptor": "PUBLIC_RANGED_CHANGE_DESCRIPTOR",
+    "derivation_window": 1000,
+    "expected_change_outputs": [1]
+  },
+  "node": { "use_configured_node": true }
+}
+```
+
+For inspection/policy-only use, omit `wallet` and `node`. Node-aware API preflight
+requires wallet context, uses one server-configured network, and fails closed
+if the node is absent/unavailable or wallet/server network configuration disagrees.
+The browser cannot supply RPC URLs, cookie paths, passwords or cookie contents.
+Configure a running local Core node only at API startup:
+
+```sh
+cargo run -p txsignx-api -- \
+  --bind 127.0.0.1:8080 --network regtest \
+  --rpc-url http://127.0.0.1:19443 \
+  --rpc-cookie-file /path/to/task-created-regtest/regtest/.cookie
+```
+
+This command starts the API, not Bitcoin Core. `node_context_available` means
+configured, not a liveness guarantee. Core remains the explicitly selected
+authority; node results are point-in-time observations, not independent consensus
+proofs. No node facts are fabricated for hosted or offline demonstrations.
+
+### HTTP and privacy boundary
+
+Default binding is loopback. Nonloopback binding requires explicit opt-in and a
+startup warning; this is an unauthenticated development service, not a production
+hosted wallet service. CORS allows only the explicit development origins
+`http://localhost:5173` and `http://127.0.0.1:5173` by default. Configure additional
+origins with repeated `--allowed-origin`; wildcard origins are not supported.
+Host validation protects local listeners against DNS rebinding. CORS is not client
+authentication: other local programs can still reach the local service.
+
+API limits are intentionally tighter than CLI limits: 1 MiB input text, 2 MiB
+request body, 8 MiB serialized output, four admitted requests and two blocking
+workers. A 30-second HTTP timeout does not abort an already-running blocking job;
+its worker permit stays held until completion. The service rejects overload
+rather than building an unbounded work queue. Engine limits continue to apply.
+
+Errors contain static codes/messages without inputs, parser internals or upstream
+RPC bodies. Responses use no-store, nosniff and no-referrer headers. Unknown JSON
+fields fail; the API accepts JSON rather than files or filesystem paths. Requests,
+descriptors, PSBTs and credentials are not logged or persisted. Reports can still
+contain identifying transaction facts and raw transaction script/witness data:
+review before explicitly copying or downloading them. Never submit wallet secrets.
+
+There is no API broadcast endpoint, signing, finalization, seed/private-key import,
+persistent wallet database, full wallet sync, PSBT v2 or AI decision logic.
+Advanced Regtest-only broadcast remains a separate M5 CLI capability.
+
+### Reproducible integration
+
+```sh
+cargo build -p txsignx-api
+python3 scripts/verify-api.py
+```
+
+This starts and stops only its own loopback API and exercises public synthetic
+raw/PSBT fixtures, actual PASS/REVIEW/BLOCK, wallet context, skipped node coverage,
+invalid/oversized inputs, CORS and unavailable API behavior.
+
+Explicit local-node verification (not part of standard tests):
+
+```sh
+python3 scripts/verify-api-regtest.py
+```
+
+The harness requires Bitcoin Core executables (default `/opt/homebrew/bin`,
+overridable through `BITCOIND`/`BITCOIN_CLI`) and `target/debug/txsignx-api`
+(override `TXSIGNX_API`). Every Core invocation includes `-regtest` and a fresh
+task-created datadir. Public networking is disabled, dedicated nondefault ports
+are used, and only the harness-owned processes are stopped. It reports datadir
+size, removes only that directory and verifies removal. It never uses `~/.bitcoin`,
+downloads a public chain, signs, finalizes or broadcasts. Brand assets remain
+local-only. See [M6 contract](docs/milestone-6-plan.md) and
+[product documentation](https://github.com/j-kon/txsignx-docs).
+
 ## Development verification
 
 ```sh
@@ -691,14 +814,14 @@ are required. See [fixture notes](crates/txsignx-core/tests/fixtures/README.md).
 - [x] Milestone 2 — PSBT inspection
 - [x] Milestone 3 — Deterministic policy engine
 - [x] Milestone 4 — Descriptor wallet context
-- [ ] Milestone 5 — Bitcoin Core / Regtest integration
-- [ ] Milestone 6 — API/web integration and capstone polish
+- [x] Milestone 5 — Bitcoin Core / Regtest integration
+- [x] Milestone 6 — API/web integration and capstone polish
 
 ## Workspace boundaries
 
 This repository contains `crates/txsignx-core`, `crates/txsignx-wallet`,
-`crates/txsignx-policy`, and
-`crates/txsignx-cli`.
+`crates/txsignx-node`, `crates/txsignx-policy`, `crates/txsignx-cli`, and
+`crates/txsignx-api`.
 The sibling [web application](https://github.com/j-kon/txsignx-web) and
 [documentation](https://github.com/j-kon/txsignx-docs) are independent repositories.
 The outer workspace is not a Git repository. Sibling `txsignx-brand/` remains
