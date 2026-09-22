@@ -31,6 +31,12 @@ pub struct MempoolAcceptance {
     pub txid: Txid,
     pub allowed: bool,
 }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeTransaction {
+    pub transaction: Transaction,
+    pub block_hash: Option<BlockHash>,
+    pub confirmations: Option<u32>,
+}
 /// Callers supply a trusted node implementation. Policy never holds or calls this trait.
 pub trait NodeRpc {
     fn blockchain_info(&self) -> Result<BlockchainInfo, NodeError>;
@@ -46,6 +52,7 @@ pub trait NodeRpc {
         transaction: &Transaction,
     ) -> Result<MempoolAcceptance, NodeError>;
     fn send_raw_transaction(&self, transaction: &Transaction) -> Result<Txid, NodeError>;
+    fn get_raw_transaction(&self, txid: &Txid) -> Result<NodeTransaction, NodeError>;
 }
 pub fn node_network(chain: &str) -> Result<Network, NodeError> {
     match chain {
@@ -111,7 +118,7 @@ impl Wire {
             .with_body(body)
             .send_lazy()
             .map_err(|_| NodeError::Rpc)?;
-        if response.status_code != 200 {
+        if response.status_code != 200 && response.status_code != 500 {
             return Err(NodeError::Rpc);
         }
         let mut bytes = Vec::new();
@@ -131,8 +138,15 @@ fn decode_response<T: for<'a> Deserialize<'a>>(bytes: &[u8]) -> Result<T, NodeEr
     let response: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| NodeError::Rpc)?;
     if response.get("id") != Some(&serde_json::json!(1))
         || response.get("jsonrpc") != Some(&serde_json::json!("2.0"))
-        || response.get("error").is_some_and(|e| !e.is_null())
     {
+        return Err(NodeError::Rpc);
+    }
+    if let Some(err) = response.get("error").filter(|e| !e.is_null()) {
+        if let Some(code) = err.get("code").and_then(|c| c.as_i64()) {
+            if code == -5 {
+                return Err(NodeError::TransactionNotFound);
+            }
+        }
         return Err(NodeError::Rpc);
     }
     let result = response.get("result").ok_or(NodeError::Rpc)?;
@@ -206,6 +220,29 @@ impl NodeRpc for BitcoinCoreRpc {
             return Err(NodeError::Rpc);
         }
         Ok(id)
+    }
+    fn get_raw_transaction(&self, txid: &Txid) -> Result<NodeTransaction, NodeError> {
+        #[derive(Deserialize)]
+        struct RawTxVerbose {
+            hex: String,
+            #[serde(default)]
+            confirmations: Option<u32>,
+            #[serde(default)]
+            blockhash: Option<BlockHash>,
+        }
+        let r: RawTxVerbose = self.wire.request(
+            "getrawtransaction",
+            &[serde_json::json!(txid.to_string()), serde_json::json!(true)],
+        )?;
+        let transaction = txsignx_core::decode_transaction(&r.hex).map_err(|_| NodeError::Rpc)?;
+        if transaction.compute_txid() != *txid {
+            return Err(NodeError::Rpc);
+        }
+        Ok(NodeTransaction {
+            transaction,
+            block_hash: r.blockhash,
+            confirmations: r.confirmations,
+        })
     }
 }
 fn acceptance(
