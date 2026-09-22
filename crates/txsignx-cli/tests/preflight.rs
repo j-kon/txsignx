@@ -20,12 +20,75 @@ fn policy_list_human_and_json_come_from_registry() {
     assert!(out.status.success());
     assert!(out.stderr.is_empty());
     let text = String::from_utf8(out.stdout).unwrap();
+
+    // Verify no ANSI escapes in redirected/piped output
     assert!(
-        text.contains("TG002")
-            && text.contains("CRITICAL")
-            && text.contains("TG014")
-            && text.contains("DEFERRED")
+        !text.contains('\x1b'),
+        "redirected policy list must not contain ANSI escapes"
     );
+
+    // Verify section headings and scope footer
+    assert!(text.contains("TxSignX Development Policy Rules"));
+    assert!(text.contains("RESERVED / DEFERRED — not evaluated"));
+    assert!(text.contains("Policy scope is incomplete."));
+
+    // Verify active rules and their severity in order
+    let expected_active = [
+        ("TG001", "CRITICAL"),
+        ("TG002", "CRITICAL"),
+        ("TG003", "CRITICAL"),
+        ("TG004", "HIGH"),
+        ("TG005", "HIGH"),
+        ("TG006", "CRITICAL"),
+        ("TG009", "CRITICAL"),
+        ("TG010", "HIGH"),
+        ("TG011", "HIGH"),
+        ("TG012", "INFO"),
+        ("TG013", "MEDIUM"),
+        ("TG014", "CRITICAL"),
+        ("TG015", "CRITICAL"),
+        ("TG016", "CRITICAL"),
+        ("TG017", "HIGH"),
+    ];
+    let mut last_idx = 0;
+    for (code, severity) in expected_active {
+        let code_pos = text[last_idx..]
+            .find(code)
+            .unwrap_or_else(|| panic!("missing {code} in order"));
+        last_idx += code_pos;
+        let line = text[last_idx..].lines().next().unwrap();
+        assert!(line.contains(severity), "expected {severity} for {code}");
+    }
+
+    // Verify deferred rules in order
+    let expected_deferred = ["TG007", "TG008"];
+    for code in expected_deferred {
+        let code_pos = text[last_idx..]
+            .find(code)
+            .unwrap_or_else(|| panic!("missing deferred {code} in order"));
+        last_idx += code_pos;
+        let line = text[last_idx..].lines().next().unwrap();
+        assert!(line.contains("DEFERRED"), "expected DEFERRED for {code}");
+    }
+
+    // Verify NO_COLOR=1 produces no ANSI escapes and matches non-TTY output
+    let no_color_out = Command::new(env!("CARGO_BIN_EXE_txsignx"))
+        .args(["policy", "list"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(no_color_out.status.success());
+    let no_color_text = String::from_utf8(no_color_out.stdout).unwrap();
+    assert!(
+        !no_color_text.contains('\x1b'),
+        "NO_COLOR=1 output must not contain ANSI escapes"
+    );
+    assert_eq!(
+        text, no_color_text,
+        "NO_COLOR output must match non-TTY output"
+    );
+
+    // Verify JSON mode preserves catalog structure
     let out = run(&["policy", "list", "--json"]);
     assert!(out.status.success());
     let catalog = json(&out);

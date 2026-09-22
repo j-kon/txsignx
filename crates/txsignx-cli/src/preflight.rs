@@ -217,32 +217,11 @@ pub fn list(json: bool) -> Result<ExitCode, Box<dyn Error>> {
         serde_json::to_writer_pretty(&mut stdout, &catalog)?;
         writeln!(stdout)?;
     } else {
-        writeln!(
-            stdout,
-            "TxSignX Development Policy Rules\n------------------------------------"
+        crate::policy_display::write_policy_list(
+            &mut stdout,
+            &catalog,
+            crate::style::should_use_color(),
         )?;
-        for rule in catalog.active_rules {
-            writeln!(
-                stdout,
-                "{}  {}  {}\n  {}\n  Required context: {}",
-                rule.code,
-                severity_name(rule.default_severity),
-                rule.title,
-                rule.description,
-                rule.required_context.join(", ")
-            )?;
-        }
-        writeln!(stdout, "\nRESERVED / DEFERRED — not evaluated")?;
-        for rule in catalog.deferred_rules {
-            writeln!(
-                stdout,
-                "{}  {}\n  Requires: {}",
-                rule.code,
-                rule.title,
-                rule.required_context.join(", ")
-            )?;
-        }
-        writeln!(stdout, "\n{POLICY_SCOPE}")?;
     }
     stdout.flush()?;
     Ok(ExitCode::SUCCESS)
