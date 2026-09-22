@@ -80,11 +80,73 @@ pub(crate) async fn dispatch(
             match path.as_str() {
                 "/api/v1/transactions/inspect" => {
                     let r: request::Transaction = parse(&bytes)?;
-                    text_limit(&r.raw_transaction)?;
-                    json(
-                        &txsignx_core::analyze_transaction(&r.raw_transaction)
-                            .map_err(|_| ApiError::INVALID)?,
-                    )
+                    match (r.raw_transaction, r.txid) {
+                        (Some(raw_hex), None) => {
+                            text_limit(&raw_hex)?;
+                            let parsed_network = match r.network.as_deref() {
+                                Some(net_str) => {
+                                    let conf: txsignx_wallet::ConfiguredNetwork = net_str
+                                        .parse()
+                                        .map_err(|_| ApiError::INVALID_NETWORK)?;
+                                    Some(conf.bitcoin_network())
+                                }
+                                None => None,
+                            };
+                            let tx = txsignx_core::decode_transaction(&raw_hex)
+                                .map_err(|_| ApiError::INVALID_TRANSACTION)?;
+                            let context = txsignx_core::transaction::TransactionAnalysisContext {
+                                network: parsed_network,
+                                chain_context: None,
+                                resolved_prevouts: None,
+                            };
+                            let report = txsignx_core::transaction::analyze_decoded_transaction_with_context(
+                                &tx,
+                                Some(&context),
+                            )
+                            .map_err(|_| ApiError::INVALID_TRANSACTION)?;
+                            json(&report)
+                        }
+                        (None, Some(txid_str)) => {
+                            text_limit(&txid_str)?;
+                            if r.network.is_some() {
+                                return Err(ApiError::INVALID_CONTEXT);
+                            }
+                            let node = state
+                                .config
+                                .node
+                                .as_ref()
+                                .ok_or(ApiError::NODE_NOT_CONFIGURED)?;
+                            let txid: bitcoin::Txid =
+                                txid_str.parse().map_err(|_| ApiError::INVALID_TXID)?;
+                            let (node_tx, prevouts, _) = node
+                                .inspect_transaction(&txid)
+                                .map_err(|_| ApiError::NODE)?;
+                            let status = if node_tx.confirmations.unwrap_or(0) > 0 {
+                                txsignx_core::transaction::TransactionConfirmationStatus::Confirmed
+                            } else {
+                                txsignx_core::transaction::TransactionConfirmationStatus::Mempool
+                            };
+                            let chain_context =
+                                txsignx_core::transaction::TransactionChainContext {
+                                    network: node.network.name().to_string(),
+                                    status,
+                                    confirmations: node_tx.confirmations,
+                                    block_hash: node_tx.block_hash.map(|h| h.to_string()),
+                                };
+                            let context = txsignx_core::transaction::TransactionAnalysisContext {
+                                network: Some(node.network.bitcoin_network()),
+                                chain_context: Some(chain_context),
+                                resolved_prevouts: Some(prevouts),
+                            };
+                            let report = txsignx_core::transaction::analyze_decoded_transaction_with_context(
+                                &node_tx.transaction,
+                                Some(&context),
+                            )
+                            .map_err(|_| ApiError::INVALID_TRANSACTION)?;
+                            json(&report)
+                        }
+                        _ => Err(ApiError::INVALID_CONTEXT),
+                    }
                 }
                 "/api/v1/psbt/inspect" => {
                     let r: request::Psbt = parse(&bytes)?;
@@ -112,7 +174,7 @@ pub(crate) async fn dispatch(
             &serde_json::json!({"status":"ok","service":"txsignx-api","version":env!("CARGO_PKG_VERSION")}),
         ),
         "/api/v1/capabilities" => json(
-            &serde_json::json!({"raw_transaction_inspection":true,"psbt_inspection":true,"preflight":true,"psbt_v0_inspection":true,"policy_preflight":true,"psbt_v2":false,"wallet_context":true,"node_context_available":state.config.node.is_some(),"signing":false,"finalization":false,"broadcast_via_api":false,"active_rules":txsignx_policy::rule_catalog().map_err(|_| ApiError::INTERNAL)?.active_rules.len(),"deferred_rules":txsignx_policy::rule_catalog().map_err(|_| ApiError::INTERNAL)?.deferred_rules.len(),"limits":{"text_bytes":TEXT_BYTES,"body_bytes":BODY_BYTES,"response_bytes":RESPONSE_BYTES,"concurrent_requests":4,"workers":2,"timeout_seconds":state.config.request_timeout.as_secs_f64()}}),
+            &serde_json::json!({"raw_transaction_inspection":true,"transaction_explorer":true,"txid_inspection":true,"transaction_address_rendering":true,"psbt_inspection":true,"preflight":true,"psbt_v0_inspection":true,"policy_preflight":true,"psbt_v2":false,"wallet_context":true,"node_context_available":state.config.node.is_some(),"signing":false,"finalization":false,"broadcast_via_api":false,"active_rules":txsignx_policy::rule_catalog().map_err(|_| ApiError::INTERNAL)?.active_rules.len(),"deferred_rules":txsignx_policy::rule_catalog().map_err(|_| ApiError::INTERNAL)?.deferred_rules.len(),"limits":{"text_bytes":TEXT_BYTES,"body_bytes":BODY_BYTES,"response_bytes":RESPONSE_BYTES,"concurrent_requests":4,"workers":2,"timeout_seconds":state.config.request_timeout.as_secs_f64()}}),
         ),
         _ => {
             let catalog = txsignx_policy::rule_catalog().map_err(|_| ApiError::INTERNAL)?;

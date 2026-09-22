@@ -707,7 +707,7 @@ VITE_TXSIGNX_API_URL=http://127.0.0.1:8080 npm run dev -- --host 127.0.0.1
 | `GET /api/v1/capabilities` | Supported operations, configuration and limits |
 | `GET /api/v1/policies` | Rust active/deferred registry |
 | `GET /api/v1/policies/{code}` | One rule or sanitized 404 |
-| `POST /api/v1/transactions/inspect` | `{ "raw_transaction": "HEX" }` |
+| `POST /api/v1/transactions/inspect` | Raw hex `{ "raw_transaction": "HEX" }` (optional `"network"`), or node-backed `{ "txid": "TXID" }` |
 | `POST /api/v1/psbt/inspect` | `{ "psbt": "BASE64" }` |
 | `POST /api/v1/psbt/preflight` | PSBT, optional policy/wallet/configured-node context |
 

@@ -11,6 +11,31 @@ impl ApiError {
         "invalid_input",
         "Invalid input or context.",
     );
+    pub const INVALID_TRANSACTION: Self = Self(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "invalid_transaction",
+        "Invalid raw transaction.",
+    );
+    pub const INVALID_NETWORK: Self = Self(
+        StatusCode::BAD_REQUEST,
+        "invalid_network",
+        "Invalid or unsupported Bitcoin network.",
+    );
+    pub const INVALID_TXID: Self = Self(
+        StatusCode::BAD_REQUEST,
+        "invalid_txid",
+        "Invalid transaction ID format.",
+    );
+    pub const NODE_NOT_CONFIGURED: Self = Self(
+        StatusCode::BAD_REQUEST,
+        "node_not_configured",
+        "Bitcoin Core node is not configured.",
+    );
+    pub const INVALID_CONTEXT: Self = Self(
+        StatusCode::BAD_REQUEST,
+        "invalid_context",
+        "Invalid request context or mutually exclusive parameters.",
+    );
     pub const JSON: Self = Self(
         StatusCode::BAD_REQUEST,
         "invalid_json",
