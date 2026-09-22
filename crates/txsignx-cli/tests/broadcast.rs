@@ -68,6 +68,9 @@ impl NodeRpc for Fake {
         self.send.set(self.send.get() + 1);
         Ok(t.compute_txid())
     }
+    fn get_raw_transaction(&self, _: &Txid) -> Result<NodeTransaction, NodeError> {
+        panic!("unexpected get_raw_transaction call in broadcast test")
+    }
 }
 fn setup(text: &str) -> Fake {
     let p = txsignx_core::psbt::decode_psbt(text).unwrap();

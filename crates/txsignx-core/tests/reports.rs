@@ -193,3 +193,127 @@ fn maximum_u64_output_remains_an_integer_in_json_without_fake_fee() {
     assert_eq!(json["outputs"][0]["value_sats"].as_u64(), Some(u64::MAX));
     assert!(json["fee_sats"].is_null());
 }
+
+#[test]
+fn context_analysis_resolves_addresses_prevouts_and_fees() {
+    let tx = common::fixture_transaction(false);
+    let prevout = bitcoin::TxOut {
+        value: Amount::from_sat(200_000),
+        script_pubkey: bitcoin::ScriptBuf::from_bytes(
+            bitcoin::hex::FromHex::from_hex(&format!("76a914{}88ac", "33".repeat(20))).unwrap(),
+        ),
+    };
+    let context = txsignx_core::transaction::TransactionAnalysisContext {
+        network: Some(bitcoin::Network::Bitcoin),
+        chain_context: Some(txsignx_core::transaction::TransactionChainContext {
+            network: "bitcoin".to_string(),
+            status: txsignx_core::transaction::TransactionConfirmationStatus::Confirmed,
+            confirmations: Some(10),
+            block_hash: Some("00".repeat(32)),
+        }),
+        resolved_prevouts: Some(vec![Some(prevout)]),
+    };
+
+    let report =
+        txsignx_core::transaction::analyze_decoded_transaction_with_context(&tx, Some(&context))
+            .unwrap();
+
+    assert_eq!(report.total_input_sats, Some(200_000));
+    assert_eq!(report.total_output_sats, 150_000);
+    assert_eq!(report.fee_sats, Some(50_000));
+    assert!(report.fee_rate.is_some());
+    let fee_rate = report.fee_rate.unwrap();
+    assert_eq!(fee_rate.fee_sats, 50_000);
+    assert_eq!(fee_rate.vsize_vb, 118);
+    assert!((fee_rate.sat_per_vb - 423.73).abs() < 0.01);
+
+    assert!(report.chain_context.is_some());
+    let chain = report.chain_context.unwrap();
+    assert_eq!(chain.network, "bitcoin");
+    assert_eq!(
+        chain.status,
+        txsignx_core::transaction::TransactionConfirmationStatus::Confirmed
+    );
+    assert_eq!(chain.confirmations, Some(10));
+
+    // Address derivation on outputs
+    assert!(report.outputs[0].address.is_some());
+    assert!(report.outputs[0].address.as_ref().unwrap().starts_with('1'));
+    assert!(report.outputs[1].address.is_some());
+    assert!(
+        report.outputs[1]
+            .address
+            .as_ref()
+            .unwrap()
+            .starts_with("bc1q")
+    );
+
+    // Resolved prevout on input
+    assert!(report.inputs[0].resolved_prevout.is_some());
+    let res = report.inputs[0].resolved_prevout.as_ref().unwrap();
+    assert_eq!(res.value_sats, 200_000);
+    assert!(res.address.is_some());
+    assert!(res.address.as_ref().unwrap().starts_with('1'));
+}
+
+#[test]
+fn context_analysis_rejects_output_exceeding_input() {
+    let tx = common::fixture_transaction(false);
+    // output total is 150_000, supply prevout of only 100_000
+    let prevout = bitcoin::TxOut {
+        value: Amount::from_sat(100_000),
+        script_pubkey: bitcoin::ScriptBuf::new(),
+    };
+    let context = txsignx_core::transaction::TransactionAnalysisContext {
+        network: None,
+        chain_context: None,
+        resolved_prevouts: Some(vec![Some(prevout)]),
+    };
+
+    let result =
+        txsignx_core::transaction::analyze_decoded_transaction_with_context(&tx, Some(&context));
+    assert!(matches!(
+        result,
+        Err(AnalysisError::OutputExceedsInput {
+            output_sats: 150_000,
+            input_sats: 100_000
+        })
+    ));
+}
+
+#[test]
+fn context_analysis_leaves_fee_unavailable_if_prevout_missing() {
+    let tx = common::fixture_transaction(false);
+    let context = txsignx_core::transaction::TransactionAnalysisContext {
+        network: None,
+        chain_context: None,
+        resolved_prevouts: Some(vec![None]), // Missing prevout
+    };
+
+    let report =
+        txsignx_core::transaction::analyze_decoded_transaction_with_context(&tx, Some(&context))
+            .unwrap();
+    assert!(report.fee_sats.is_none());
+    assert!(report.fee_rate.is_none());
+    assert!(report.total_input_sats.is_none());
+}
+
+#[test]
+fn coinbase_transaction_does_not_calculate_fee() {
+    let genesis = bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Bitcoin);
+    let coinbase = &genesis.txdata[0];
+    let context = txsignx_core::transaction::TransactionAnalysisContext {
+        network: Some(bitcoin::Network::Bitcoin),
+        chain_context: None,
+        resolved_prevouts: Some(vec![None]),
+    };
+    let report = txsignx_core::transaction::analyze_decoded_transaction_with_context(
+        coinbase,
+        Some(&context),
+    )
+    .unwrap();
+    assert!(report.fee_sats.is_none());
+    assert!(report.fee_rate.is_none());
+    assert!(report.total_input_sats.is_none());
+    assert!(report.inputs[0].resolved_prevout.is_none());
+}

@@ -84,4 +84,7 @@ impl NodeRpc for Fake {
     fn send_raw_transaction(&self, _: &Transaction) -> Result<Txid, NodeError> {
         panic!("read-only context must not send")
     }
+    fn get_raw_transaction(&self, _: &Txid) -> Result<NodeTransaction, NodeError> {
+        panic!("unexpected get_raw_transaction call in test")
+    }
 }

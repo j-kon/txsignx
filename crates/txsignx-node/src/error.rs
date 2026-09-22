@@ -24,4 +24,6 @@ pub enum NodeError {
     Extraction,
     #[error("Bitcoin Core did not allow the candidate transaction")]
     MempoolRejected,
+    #[error("transaction not found in mempool or blockchain (txindex may be required)")]
+    TransactionNotFound,
 }

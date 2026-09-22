@@ -24,4 +24,10 @@ pub enum AnalysisError {
     InvalidTransaction(#[from] bitcoin::consensus::encode::Error),
     #[error("transaction weight {weight_wu} WU exceeds the {max_weight_wu} WU safety limit")]
     WeightExceeded { weight_wu: u64, max_weight_wu: u64 },
+    #[error("input previous-output value exceeds the report integer range in satoshis")]
+    InputValueOverflow,
+    #[error("total output value {output_sats} sats exceeds total input value {input_sats} sats")]
+    OutputExceedsInput { output_sats: u64, input_sats: u64 },
+    #[error("resolved prevouts count does not match transaction input count")]
+    PrevoutCountMismatch,
 }
