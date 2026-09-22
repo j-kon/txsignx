@@ -2,7 +2,9 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Transaction {
-    pub raw_transaction: String,
+    pub raw_transaction: Option<String>,
+    pub txid: Option<String>,
+    pub network: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -7,6 +7,7 @@ publish.workspace = true
 [dependencies]
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time", "signal"] }
+bitcoin.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

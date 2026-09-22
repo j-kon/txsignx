@@ -917,6 +917,7 @@ name = "txsignx-api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "bitcoin",
  "clap",
  "serde",
  "serde_json",
