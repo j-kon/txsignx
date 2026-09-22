@@ -1,4 +1,7 @@
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, Write};
+
+pub use crate::style::should_use_color;
+use crate::style::{ANSI_BITCOIN_ORANGE, ANSI_BOLD, ANSI_BOLD_WHITE, ANSI_MUTED, ANSI_RESET};
 
 pub const LOGO_LINES: &[&str] = &[
     "████████╗██╗  ██╗███████╗██╗ ██████╗ ███╗   ██╗██╗  ██╗",
@@ -29,20 +32,6 @@ const LOGO_PARTS: &[(&str, &str)] = &[
         "╚═╝  ╚═╝",
     ),
 ];
-
-const ANSI_RESET: &str = "\x1b[0m";
-const ANSI_BOLD_WHITE: &str = "\x1b[1;97m";
-const ANSI_BITCOIN_ORANGE: &str = "\x1b[1;38;2;247;147;26m";
-const ANSI_MUTED: &str = "\x1b[90m";
-const ANSI_BOLD: &str = "\x1b[1m";
-
-pub fn should_use_color() -> bool {
-    io::stdout().is_terminal()
-        && match std::env::var_os("NO_COLOR") {
-            None => true,
-            Some(val) => val.is_empty(),
-        }
-}
 
 pub fn write_banner(out: &mut impl Write, use_color: bool, version: &str) -> io::Result<()> {
     if use_color {

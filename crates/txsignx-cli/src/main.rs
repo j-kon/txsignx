@@ -11,9 +11,11 @@ mod banner;
 mod display;
 mod node_display;
 mod node_input;
+mod policy_display;
 mod preflight;
 mod psbt_display;
 mod psbt_input;
+mod style;
 mod wallet_display;
 mod wallet_input;
 
