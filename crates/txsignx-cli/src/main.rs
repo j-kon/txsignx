@@ -5,7 +5,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use txsignx_core::{analyze_psbt, analyze_transaction};
+use txsignx_core::analyze_psbt;
 
 mod banner;
 mod display;
@@ -47,11 +47,23 @@ enum Command {
 
 #[derive(Subcommand)]
 enum TransactionCommand {
-    /// Analyze a consensus-serialized transaction without network or prevout context.
+    /// Analyze a consensus-serialized transaction or fetch by txid from Bitcoin Core.
     Inspect {
         /// Raw transaction as strict hex, without whitespace or a 0x prefix.
         #[arg(value_name = "RAW_TX_HEX")]
-        raw_tx_hex: String,
+        raw_tx_hex: Option<String>,
+        /// Transaction ID to fetch from a configured Bitcoin Core node.
+        #[arg(long, value_name = "TXID")]
+        txid: Option<String>,
+        /// Exact local HTTP endpoint: http://127.0.0.1:PORT or http://[::1]:PORT.
+        #[arg(long, value_name = "URL", visible_alias = "rpc-url")]
+        node_url: Option<String>,
+        /// Bitcoin Core cookie authentication file; contents are never reported.
+        #[arg(long, value_name = "PATH", visible_alias = "rpc-cookie-file")]
+        cookie_file: Option<std::path::PathBuf>,
+        /// Bitcoin network: bitcoin, mainnet, testnet, testnet4, signet, regtest.
+        #[arg(long, value_name = "NETWORK")]
+        network: Option<String>,
         /// Emit only a JSON report on stdout (diagnostics remain on stderr).
         #[arg(long)]
         json: bool,
@@ -118,10 +130,88 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
             stdout.flush()?;
         }
         Command::Tx {
-            command: TransactionCommand::Inspect { raw_tx_hex, json },
+            command:
+                TransactionCommand::Inspect {
+                    raw_tx_hex,
+                    txid,
+                    node_url,
+                    cookie_file,
+                    network,
+                    json,
+                },
         } => {
-            // Analyze before writing anything, so malformed input leaves stdout empty.
-            let report = analyze_transaction(&raw_tx_hex)?;
+            let report = match (raw_tx_hex, txid) {
+                (Some(_), Some(_)) => {
+                    return Err("cannot specify both raw transaction hex and --txid".into());
+                }
+                (None, None) => {
+                    return Err("must specify either raw transaction hex or --txid".into());
+                }
+                (Some(raw_hex), None) => {
+                    if node_url.is_some() || cookie_file.is_some() {
+                        return Err("node options are only supported with --txid".into());
+                    }
+                    let parsed_network = match network.as_deref() {
+                        Some(net_str) => {
+                            let conf: txsignx_wallet::ConfiguredNetwork = net_str.parse()?;
+                            Some(conf.bitcoin_network())
+                        }
+                        None => None,
+                    };
+                    let tx = txsignx_core::decode_transaction(&raw_hex)?;
+                    let context = txsignx_core::transaction::TransactionAnalysisContext {
+                        network: parsed_network,
+                        chain_context: None,
+                        resolved_prevouts: None,
+                    };
+                    txsignx_core::transaction::analyze_decoded_transaction_with_context(
+                        &tx,
+                        Some(&context),
+                    )?
+                }
+                (None, Some(txid_str)) => {
+                    let (Some(url), Some(cookie_path), Some(net_str)) = (
+                        node_url.as_deref(),
+                        cookie_file.as_deref(),
+                        network.as_deref(),
+                    ) else {
+                        return Err(
+                            "--txid requires explicit --node-url, --cookie-file, and --network"
+                                .into(),
+                        );
+                    };
+                    let conf_net: txsignx_wallet::ConfiguredNetwork = net_str.parse()?;
+                    let bitcoin_net = conf_net.bitcoin_network();
+                    let txid: bitcoin::Txid =
+                        txid_str.parse().map_err(|_| "invalid txid format")?;
+
+                    let client = txsignx_node::BitcoinCoreRpc::new(url, cookie_path)?;
+                    let (node_tx, prevouts, _) =
+                        txsignx_node::fetch_transaction_with_context(&client, &txid, bitcoin_net)?;
+
+                    let status = if node_tx.confirmations.unwrap_or(0) > 0 {
+                        txsignx_core::transaction::TransactionConfirmationStatus::Confirmed
+                    } else {
+                        txsignx_core::transaction::TransactionConfirmationStatus::Mempool
+                    };
+                    let chain_context = txsignx_core::transaction::TransactionChainContext {
+                        network: conf_net.name().to_string(),
+                        status,
+                        confirmations: node_tx.confirmations,
+                        block_hash: node_tx.block_hash.map(|h| h.to_string()),
+                    };
+                    let context = txsignx_core::transaction::TransactionAnalysisContext {
+                        network: Some(bitcoin_net),
+                        chain_context: Some(chain_context),
+                        resolved_prevouts: Some(prevouts),
+                    };
+                    txsignx_core::transaction::analyze_decoded_transaction_with_context(
+                        &node_tx.transaction,
+                        Some(&context),
+                    )?
+                }
+            };
+
             let mut stdout = BufWriter::new(io::stdout().lock());
             if json {
                 serde_json::to_writer_pretty(&mut stdout, &report)?;
