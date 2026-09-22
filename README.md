@@ -2,10 +2,11 @@
 
 **Inspect. Verify. Sign with Confidence.**
 
-Bitcoin transaction security before signing.
+Bitcoin Transaction Explorer and Pre-Signing Security Analyzer.
 
-TxSignX is an open-source Bitcoin transaction and PSBT security preflight engine
-written in Rust. Milestone 1 implements raw-transaction inspection; Milestone 2
+TxSignX is an open-source Bitcoin transaction explorer and pre-signing security
+analyzer written in Rust. Milestone 1 implements transaction inspection and
+exploration (supporting raw hex offline and txid lookup via Bitcoin Core); Milestone 2
 adds PSBT v0 inspection; Milestone 3 adds deterministic development policy
 evaluation; Milestone 4 adds bounded public-descriptor wallet context. Milestone 5
 adds Bitcoin Core chain context and strictly gated Regtest broadcast. Milestone 6
@@ -103,14 +104,26 @@ values and serializable structures independently of rust-bitcoin's JSON types.
 
 ## Context and safety limits
 
-**No network inference.** A raw transaction has no mainnet/testnet/signet/regtest
-identifier. The analyzer does not infer a network or generate addresses.
+**Explicit network only.** A raw transaction does not encode a network. To render
+standard output addresses or verify against a Bitcoin Core node, an explicit
+`--network` (`bitcoin`, `mainnet`, `testnet`, `testnet4`, `signet`, `regtest`) is
+required. TxSignX never infers the network or fabricates addresses.
 
-**No raw-transaction fee calculation.** Inputs identify the previous outputs being spent, but
-omit their values. Output totals alone cannot establish a fee or feerate.
-Human output states `Fee: unavailable without prevout context`; JSON uses
-`fee_sats: null`. PSBT inspection can use supplied prevout information for an absolute fee.
-Node-aware preflight can additionally compare supplied prevouts with Bitcoin Core.
+**Offline vs. node-assisted inspection.** Raw inspection (`txsignx tx inspect <RAW_TX_HEX>`)
+operates strictly offline and node-independently. Node-assisted transaction inspection
+(`txsignx tx inspect --txid <TXID> --node-url <URL> --cookie-file <PATH> --network <NET>`)
+queries Bitcoin Core via loopback RPC (`http://127.0.0.1:PORT` or `http://[::1]:PORT`);
+historical txid lookup generally requires Bitcoin Core `txindex=1`. Txid mode enforces
+a 1 MiB response body limit and 5-second timeout.
+
+**Fee and prevout requirements.** Raw consensus transactions omit previous output values.
+Input totals, fees, and fee rates require resolved previous outputs (resolved via Bitcoin Core
+in txid mode or via PSBT metadata). When previous outputs are unresolvable or missing, fees
+are reported as unavailable; TxSignX never invents fee values.
+
+**Pre-signing security boundaries.** TxSignX is an explorer and pre-signing security analyzer,
+not a wallet. It does not generate keys, handle seeds, sign transactions, or alter pre-signing
+policy boundaries. API and web presentation boundaries remain unchanged.
 
 **Explicit RBF only.** Under [BIP125](https://bips.dev/125/), an input signals
 explicitly when `nSequence < 0xfffffffe`; the transaction signals if any input
