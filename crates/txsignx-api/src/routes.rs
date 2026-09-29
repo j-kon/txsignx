@@ -6,13 +6,20 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Serialize, de::DeserializeOwned};
-use std::io::Write;
+use std::{io::Write, sync::Arc};
 pub(crate) fn text_limit(text: &str) -> Result<(), ApiError> {
     if text.len() > TEXT_BYTES {
         Err(ApiError::SIZE)
     } else {
         Ok(())
     }
+}
+pub(crate) async fn ws_stream(
+    State(state): State<AppState>,
+    ws: axum::extract::ws::WebSocketUpgrade,
+) -> Result<Response, ApiError> {
+    let live = state.live.as_ref().ok_or(ApiError::NODE_NOT_CONFIGURED)?;
+    Ok(Arc::clone(live).handle_ws_upgrade(ws).await)
 }
 struct Bounded(Vec<u8>);
 impl Write for Bounded {
@@ -161,7 +168,12 @@ pub(crate) async fn dispatch(
     }
     let known = matches!(
         path.as_str(),
-        "/api/v1/health" | "/api/v1/capabilities" | "/api/v1/policies"
+        "/api/v1/health"
+            | "/api/v1/capabilities"
+            | "/api/v1/policies"
+            | "/api/v1/live/snapshot"
+            | "/api/v1/blocks/recent"
+            | "/api/v1/mempool/summary"
     ) || path.starts_with("/api/v1/policies/");
     if !known {
         return Err(ApiError::MISSING);
@@ -173,9 +185,46 @@ pub(crate) async fn dispatch(
         "/api/v1/health" => json(
             &serde_json::json!({"status":"ok","service":"txsignx-api","version":env!("CARGO_PKG_VERSION")}),
         ),
-        "/api/v1/capabilities" => json(
-            &serde_json::json!({"raw_transaction_inspection":true,"transaction_explorer":true,"txid_inspection":true,"transaction_address_rendering":true,"psbt_inspection":true,"preflight":true,"psbt_v0_inspection":true,"policy_preflight":true,"psbt_v2":false,"wallet_context":true,"node_context_available":state.config.node.is_some(),"signing":false,"finalization":false,"broadcast_via_api":false,"active_rules":txsignx_policy::rule_catalog().map_err(|_| ApiError::INTERNAL)?.active_rules.len(),"deferred_rules":txsignx_policy::rule_catalog().map_err(|_| ApiError::INTERNAL)?.deferred_rules.len(),"limits":{"text_bytes":TEXT_BYTES,"body_bytes":BODY_BYTES,"response_bytes":RESPONSE_BYTES,"concurrent_requests":4,"workers":2,"timeout_seconds":state.config.request_timeout.as_secs_f64()}}),
-        ),
+        "/api/v1/capabilities" => json(&serde_json::json!({
+            "raw_transaction_inspection":true,
+            "transaction_explorer":true,
+            "txid_inspection":true,
+            "transaction_address_rendering":true,
+            "psbt_inspection":true,
+            "preflight":true,
+            "psbt_v0_inspection":true,
+            "policy_preflight":true,
+            "psbt_v2":false,
+            "wallet_context":true,
+            "node_context_available":state.config.node.is_some(),
+            "live_chain":state.config.node.is_some(),
+            "live_stream":state.config.node.is_some(),
+            "signing":false,
+            "finalization":false,
+            "broadcast_via_api":false,
+            "active_rules":txsignx_policy::rule_catalog().map_err(|_| ApiError::INTERNAL)?.active_rules.len(),
+            "deferred_rules":txsignx_policy::rule_catalog().map_err(|_| ApiError::INTERNAL)?.deferred_rules.len(),
+            "limits":{
+                "text_bytes":TEXT_BYTES,
+                "body_bytes":BODY_BYTES,
+                "response_bytes":RESPONSE_BYTES,
+                "concurrent_requests":4,
+                "workers":2,
+                "timeout_seconds":state.config.request_timeout.as_secs_f64()
+            }
+        })),
+        "/api/v1/live/snapshot" => {
+            let live = state.live.as_ref().ok_or(ApiError::NODE_NOT_CONFIGURED)?;
+            json(&live.get_snapshot().await?)
+        }
+        "/api/v1/blocks/recent" => {
+            let live = state.live.as_ref().ok_or(ApiError::NODE_NOT_CONFIGURED)?;
+            json(&live.get_recent_blocks().await?)
+        }
+        "/api/v1/mempool/summary" => {
+            let live = state.live.as_ref().ok_or(ApiError::NODE_NOT_CONFIGURED)?;
+            json(&live.get_mempool_summary().await?)
+        }
         _ => {
             let catalog = txsignx_policy::rule_catalog().map_err(|_| ApiError::INTERNAL)?;
             if path == "/api/v1/policies" {

@@ -21,6 +21,7 @@ pub struct ConfiguredNode {
     pub network: ConfiguredNetwork,
     pub(crate) observe: Arc<Observe>,
     pub(crate) inspect_tx: Arc<InspectTx>,
+    pub(crate) rpc: Arc<dyn txsignx_node::NodeRpc + Send + Sync>,
 }
 impl ConfiguredNode {
     pub fn new<R: txsignx_node::NodeRpc + Send + Sync + 'static>(
@@ -30,6 +31,7 @@ impl ConfiguredNode {
         let rpc = Arc::new(rpc);
         let rpc_observe = Arc::clone(&rpc);
         let rpc_inspect = Arc::clone(&rpc);
+        let rpc_dyn: Arc<dyn txsignx_node::NodeRpc + Send + Sync> = rpc;
         Self {
             network,
             observe: Arc::new(move |report| {
@@ -42,7 +44,12 @@ impl ConfiguredNode {
                     network.bitcoin_network(),
                 )
             }),
+            rpc: rpc_dyn,
         }
+    }
+
+    pub fn rpc(&self) -> &(dyn txsignx_node::NodeRpc + Send + Sync) {
+        &*self.rpc
     }
 
     pub(crate) fn inspect_transaction(
