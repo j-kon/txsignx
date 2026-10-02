@@ -96,11 +96,19 @@ pub struct LiveTransactionSummary {
     pub first_seen_at: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depends: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hydration_status: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LiveSnapshot {
     pub network: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_label: Option<String>,
     pub tip_height: u64,
     pub tip_hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -120,6 +128,7 @@ pub struct LiveSnapshot {
 pub enum LiveEvent {
     Snapshot(LiveSnapshot),
     TransactionAdded(LiveTransactionSummary),
+    TransactionUpdated(LiveTransactionSummary),
     TransactionRemoved {
         txid: String,
     },

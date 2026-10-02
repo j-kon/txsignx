@@ -3,8 +3,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-#[derive(Clone, Copy)]
-pub(crate) struct ApiError(pub StatusCode, pub &'static str, pub &'static str);
+#[derive(Clone, Copy, Debug)]
+pub struct ApiError(pub StatusCode, pub &'static str, pub &'static str);
 impl ApiError {
     pub const INVALID: Self = Self(
         StatusCode::UNPROCESSABLE_ENTITY,
@@ -35,6 +35,11 @@ impl ApiError {
         StatusCode::NOT_FOUND,
         "block_not_found",
         "Block not found in blockchain.",
+    );
+    pub const TRANSACTION_NOT_FOUND: Self = Self(
+        StatusCode::NOT_FOUND,
+        "transaction_not_found",
+        "Transaction not found in blockchain or mempool.",
     );
     pub const NODE_NOT_CONFIGURED: Self = Self(
         StatusCode::BAD_REQUEST,

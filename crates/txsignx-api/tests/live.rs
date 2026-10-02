@@ -517,6 +517,8 @@ fn test_stream_event_serialization() {
         has_witness: Some(true),
         first_seen_at: Some(1700000000),
         depends: Some(vec!["parent_txid_1".to_string()]),
+        source: None,
+        hydration_status: None,
     };
 
     let block_summary = RecentBlockSummary {

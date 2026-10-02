@@ -66,9 +66,17 @@ impl ConfiguredNode {
         (self.inspect_tx)(txid)
     }
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LiveSourceConfig {
+    #[default]
+    BitcoinCore,
+    PublicMainnet,
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub node: Option<ConfiguredNode>,
+    pub live_source: LiveSourceConfig,
     pub allowed_origins: Vec<String>,
     /// Exact authorities accepted in Host, including ports.
     pub allowed_hosts: Vec<String>,
@@ -78,6 +86,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             node: None,
+            live_source: LiveSourceConfig::default(),
             allowed_origins: vec![
                 "http://localhost:5173".into(),
                 "http://127.0.0.1:5173".into(),
