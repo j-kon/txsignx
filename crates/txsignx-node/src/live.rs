@@ -17,6 +17,50 @@ pub struct RecentBlockSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockTransactionItem {
+    pub index: usize,
+    pub txid: String,
+    pub is_coinbase: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockTransactionPage {
+    pub items: Vec<BlockTransactionItem>,
+    pub offset: usize,
+    pub limit: usize,
+    pub total: usize,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BlockDetails {
+    pub network: String,
+    pub height: u64,
+    pub hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_block_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_block_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merkle_root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<i32>,
+    pub timestamp: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub median_time: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bits: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub difficulty: Option<f64>,
+    pub tx_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weight: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    pub transactions: BlockTransactionPage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MempoolSummary {
     pub tx_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]

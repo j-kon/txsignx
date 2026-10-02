@@ -26,6 +26,16 @@ impl ApiError {
         "invalid_txid",
         "Invalid transaction ID format.",
     );
+    pub const INVALID_BLOCK_HASH: Self = Self(
+        StatusCode::BAD_REQUEST,
+        "invalid_block_hash",
+        "Invalid block hash: must be a 64-character hexadecimal string.",
+    );
+    pub const BLOCK_NOT_FOUND: Self = Self(
+        StatusCode::NOT_FOUND,
+        "block_not_found",
+        "Block not found in blockchain.",
+    );
     pub const NODE_NOT_CONFIGURED: Self = Self(
         StatusCode::BAD_REQUEST,
         "node_not_configured",

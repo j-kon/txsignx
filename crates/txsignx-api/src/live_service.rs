@@ -14,8 +14,8 @@ use std::{
 };
 use tokio::sync::{RwLock, broadcast};
 use txsignx_node::{
-    LiveEvent, LiveSnapshot, LiveTransactionSummary, MAX_LIVE_TRANSACTIONS, MAX_RECENT_BLOCKS,
-    MempoolEntry, MempoolSummary, RecentBlockSummary,
+    BlockDetails, LiveEvent, LiveSnapshot, LiveTransactionSummary, MAX_LIVE_TRANSACTIONS,
+    MAX_RECENT_BLOCKS, MempoolEntry, MempoolSummary, RecentBlockSummary,
 };
 
 pub const MAX_WS_CLIENTS: usize = 32;
@@ -102,6 +102,40 @@ impl LiveService {
             .rpc()
             .mempool_summary()
             .map_err(|_| ApiError::NODE)
+    }
+
+    pub(crate) async fn get_block_details(
+        &self,
+        hash: &bitcoin::BlockHash,
+        offset: usize,
+        limit: usize,
+    ) -> Result<BlockDetails, ApiError> {
+        self.node
+            .rpc()
+            .get_block_details(hash, offset, limit)
+            .map_err(|e| match e {
+                txsignx_node::NodeError::BlockNotFound
+                | txsignx_node::NodeError::TransactionNotFound => ApiError::BLOCK_NOT_FOUND,
+                _ => ApiError::NODE,
+            })
+    }
+
+    pub(crate) async fn get_block_details_by_height(
+        &self,
+        height: u64,
+        offset: usize,
+        limit: usize,
+    ) -> Result<BlockDetails, ApiError> {
+        let hash = self
+            .node
+            .rpc()
+            .block_hash_by_height(height)
+            .map_err(|e| match e {
+                txsignx_node::NodeError::BlockNotFound
+                | txsignx_node::NodeError::TransactionNotFound => ApiError::BLOCK_NOT_FOUND,
+                _ => ApiError::NODE,
+            })?;
+        self.get_block_details(&hash, offset, limit).await
     }
 
     pub(crate) async fn handle_ws_upgrade(self: Arc<Self>, ws: WebSocketUpgrade) -> Response {

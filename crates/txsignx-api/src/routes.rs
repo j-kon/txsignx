@@ -174,7 +174,8 @@ pub(crate) async fn dispatch(
             | "/api/v1/live/snapshot"
             | "/api/v1/blocks/recent"
             | "/api/v1/mempool/summary"
-    ) || path.starts_with("/api/v1/policies/");
+    ) || path.starts_with("/api/v1/policies/")
+        || path.starts_with("/api/v1/blocks/");
     if !known {
         return Err(ApiError::MISSING);
     }
@@ -199,6 +200,7 @@ pub(crate) async fn dispatch(
             "node_context_available":state.config.node.is_some(),
             "live_chain":state.config.node.is_some(),
             "live_stream":state.config.node.is_some(),
+            "block_details":state.config.node.is_some(),
             "signing":false,
             "finalization":false,
             "broadcast_via_api":false,
@@ -225,6 +227,28 @@ pub(crate) async fn dispatch(
             let live = state.live.as_ref().ok_or(ApiError::NODE_NOT_CONFIGURED)?;
             json(&live.get_mempool_summary().await?)
         }
+        _ if path.starts_with("/api/v1/blocks/height/") => {
+            let live = state.live.as_ref().ok_or(ApiError::NODE_NOT_CONFIGURED)?;
+            let height_str = path.strip_prefix("/api/v1/blocks/height/").unwrap_or("");
+            let height: u64 = height_str.parse().map_err(|_| ApiError::INVALID)?;
+            let (offset, limit) = parse_block_query(req.uri().query());
+            let details = live
+                .get_block_details_by_height(height, offset, limit)
+                .await?;
+            json(&details)
+        }
+        _ if path.starts_with("/api/v1/blocks/") => {
+            let live = state.live.as_ref().ok_or(ApiError::NODE_NOT_CONFIGURED)?;
+            let hash_str = path.strip_prefix("/api/v1/blocks/").unwrap_or("");
+            if hash_str.len() != 64 || !hash_str.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err(ApiError::INVALID_BLOCK_HASH);
+            }
+            let block_hash: bitcoin::BlockHash =
+                hash_str.parse().map_err(|_| ApiError::INVALID_BLOCK_HASH)?;
+            let (offset, limit) = parse_block_query(req.uri().query());
+            let details = live.get_block_details(&block_hash, offset, limit).await?;
+            json(&details)
+        }
         _ => {
             let catalog = txsignx_policy::rule_catalog().map_err(|_| ApiError::INTERNAL)?;
             if path == "/api/v1/policies" {
@@ -242,4 +266,29 @@ pub(crate) async fn dispatch(
             Err(ApiError::MISSING)
         }
     }
+}
+
+fn parse_block_query(query_str: Option<&str>) -> (usize, usize) {
+    let mut offset = 0;
+    let mut limit = 50;
+    if let Some(q) = query_str {
+        for part in q.split('&') {
+            if let Some((k, v)) = part.split_once('=') {
+                match k {
+                    "offset" => {
+                        if let Ok(val) = v.parse::<usize>() {
+                            offset = val;
+                        }
+                    }
+                    "limit" => {
+                        if let Ok(val) = v.parse::<usize>() {
+                            limit = val.clamp(1, 100);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    (offset, limit)
 }

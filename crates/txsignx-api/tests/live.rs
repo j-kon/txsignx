@@ -6,9 +6,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use txsignx_api::{Config, ConfiguredNode, app, app_with_config};
 use txsignx_node::{
-    BlockchainInfo, LiveEvent, LiveSnapshot, LiveTransactionSummary, MAX_LIVE_TRANSACTIONS,
-    MAX_RECENT_BLOCKS, MempoolEntry, MempoolEntryFees, MempoolSummary, NodeError, NodeRpc,
-    NodeTransaction, NodeTxOut, RecentBlockSummary,
+    BlockDetails, BlockTransactionItem, BlockTransactionPage, BlockchainInfo, LiveEvent,
+    LiveSnapshot, LiveTransactionSummary, MAX_LIVE_TRANSACTIONS, MAX_RECENT_BLOCKS, MempoolEntry,
+    MempoolEntryFees, MempoolSummary, NodeError, NodeRpc, NodeTransaction, NodeTxOut,
+    RecentBlockSummary,
 };
 use txsignx_wallet::ConfiguredNetwork;
 
@@ -154,6 +155,56 @@ impl NodeRpc for MockLiveRpc {
             return Err(NodeError::Rpc);
         }
         Ok(self.block_txids.clone())
+    }
+    fn get_block_details(
+        &self,
+        hash: &BlockHash,
+        offset: usize,
+        limit: usize,
+    ) -> Result<BlockDetails, NodeError> {
+        if self.should_fail {
+            return Err(NodeError::Rpc);
+        }
+        if hash.to_string() == "0000000000000000000000000000000000000000000000000000000000000404" {
+            return Err(NodeError::BlockNotFound);
+        }
+        let total = 120;
+        let bounded_limit = limit.clamp(1, 100);
+        let items: Vec<BlockTransactionItem> = (offset..total.min(offset + bounded_limit))
+            .map(|i| BlockTransactionItem {
+                index: i,
+                txid: format!("{:064x}", i + 1),
+                is_coinbase: i == 0,
+            })
+            .collect();
+        let has_more = offset + items.len() < total;
+        Ok(BlockDetails {
+            network: "regtest".to_string(),
+            height: 105,
+            hash: hash.to_string(),
+            previous_block_hash: Some(
+                "1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+            ),
+            next_block_hash: None,
+            merkle_root: Some(
+                "2222222222222222222222222222222222222222222222222222222222222222".to_string(),
+            ),
+            version: Some(536870912),
+            timestamp: 1700000105,
+            median_time: Some(1700000100),
+            bits: Some("207fffff".to_string()),
+            difficulty: Some(4.65e-10),
+            tx_count: total,
+            weight: Some(888),
+            size: Some(249),
+            transactions: BlockTransactionPage {
+                items,
+                offset,
+                limit: bounded_limit,
+                total,
+                has_more,
+            },
+        })
     }
 }
 
@@ -563,4 +614,167 @@ async fn test_no_credential_exposure() {
             endpoint
         );
     }
+}
+
+#[tokio::test]
+async fn test_block_details_lookup() {
+    let mock = MockLiveRpc::new(Network::Regtest);
+    let app = create_node_app(mock);
+    let valid_hash = "0000000000000000000000000000000000000000000000000000000000000001";
+    let (status, body) = request(
+        app.clone(),
+        "GET",
+        &format!("/api/v1/blocks/{}", valid_hash),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let details: BlockDetails = serde_json::from_value(body.clone()).unwrap();
+    assert_eq!(details.height, 105);
+    assert_eq!(details.hash, valid_hash);
+    assert_eq!(details.tx_count, 120);
+    assert_eq!(details.weight, Some(888));
+    assert_eq!(details.size, Some(249));
+    assert_eq!(details.version, Some(536870912));
+    assert_eq!(details.bits, Some("207fffff".to_string()));
+    assert_eq!(details.median_time, Some(1700000100));
+
+    // Default pagination limit is 50
+    assert_eq!(details.transactions.offset, 0);
+    assert_eq!(details.transactions.limit, 50);
+    assert_eq!(details.transactions.total, 120);
+    assert!(details.transactions.has_more);
+    assert_eq!(details.transactions.items.len(), 50);
+
+    // Coinbase check on first item
+    assert_eq!(details.transactions.items[0].index, 0);
+    assert!(details.transactions.items[0].is_coinbase);
+    // Second item is not coinbase
+    assert_eq!(details.transactions.items[1].index, 1);
+    assert!(!details.transactions.items[1].is_coinbase);
+
+    // No credentials leaked
+    let text = body.to_string();
+    assert!(!text.contains("18443"));
+    assert!(!text.contains(".cookie"));
+    assert!(!text.contains("rpcuser"));
+    assert!(!text.contains("rpcpassword"));
+}
+
+#[tokio::test]
+async fn test_block_details_pagination_and_limit_clamp() {
+    let mock = MockLiveRpc::new(Network::Regtest);
+    let app = create_node_app(mock);
+    let valid_hash = "0000000000000000000000000000000000000000000000000000000000000001";
+
+    // Request limit=200, must be clamped to 100
+    let (status, body) = request(
+        app.clone(),
+        "GET",
+        &format!("/api/v1/blocks/{}?limit=200", valid_hash),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let details: BlockDetails = serde_json::from_value(body).unwrap();
+    assert_eq!(details.transactions.limit, 100);
+    assert_eq!(details.transactions.items.len(), 100);
+    assert!(details.transactions.has_more);
+
+    // Request offset=100, limit=50 -> should return remaining 20 items and has_more = false
+    let (status, body) = request(
+        app.clone(),
+        "GET",
+        &format!("/api/v1/blocks/{}?offset=100&limit=50", valid_hash),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let details: BlockDetails = serde_json::from_value(body).unwrap();
+    assert_eq!(details.transactions.offset, 100);
+    assert_eq!(details.transactions.items.len(), 20);
+    assert!(!details.transactions.has_more);
+    assert_eq!(details.transactions.items[0].index, 100);
+    assert!(!details.transactions.items[0].is_coinbase);
+}
+
+#[tokio::test]
+async fn test_block_details_by_height() {
+    let mock = MockLiveRpc::new(Network::Regtest);
+    let app = create_node_app(mock);
+
+    let (status, body) =
+        request(app.clone(), "GET", "/api/v1/blocks/height/105", Value::Null).await;
+    assert_eq!(status, 200);
+    let details: BlockDetails = serde_json::from_value(body).unwrap();
+    assert_eq!(details.height, 105);
+}
+
+#[tokio::test]
+async fn test_block_details_invalid_hash() {
+    let mock = MockLiveRpc::new(Network::Regtest);
+    let app = create_node_app(mock);
+
+    // Not 64 chars
+    let (status, body) = request(
+        app.clone(),
+        "GET",
+        "/api/v1/blocks/not_a_valid_hash",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert_eq!(body["error"]["code"], "invalid_block_hash");
+
+    // 64 chars but non-hex
+    let (status, body) = request(
+        app.clone(),
+        "GET",
+        "/api/v1/blocks/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert_eq!(body["error"]["code"], "invalid_block_hash");
+}
+
+#[tokio::test]
+async fn test_block_details_unknown_block() {
+    let mock = MockLiveRpc::new(Network::Regtest);
+    let app = create_node_app(mock);
+
+    let not_found_hash = "0000000000000000000000000000000000000000000000000000000000000404";
+    let (status, body) = request(
+        app.clone(),
+        "GET",
+        &format!("/api/v1/blocks/{}", not_found_hash),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, 404);
+    assert_eq!(body["error"]["code"], "block_not_found");
+}
+
+#[tokio::test]
+async fn test_block_details_node_unavailable() {
+    let mut mock = MockLiveRpc::new(Network::Regtest);
+    mock.should_fail = true;
+    let app = create_node_app(mock);
+
+    let valid_hash = "0000000000000000000000000000000000000000000000000000000000000001";
+    let (status, body) = request(
+        app.clone(),
+        "GET",
+        &format!("/api/v1/blocks/{}", valid_hash),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, 503);
+    assert_eq!(body["error"]["code"], "node_unavailable");
+
+    let (status, body) =
+        request(app.clone(), "GET", "/api/v1/blocks/height/105", Value::Null).await;
+    assert_eq!(status, 503);
+    assert_eq!(body["error"]["code"], "node_unavailable");
 }

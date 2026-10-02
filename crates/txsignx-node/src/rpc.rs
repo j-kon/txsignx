@@ -1,6 +1,9 @@
 use crate::{
     NodeError, RpcEndpoint,
-    live::{MAX_RECENT_BLOCKS, MempoolSummary, RecentBlockSummary},
+    live::{
+        BlockDetails, BlockTransactionItem, BlockTransactionPage, MAX_RECENT_BLOCKS,
+        MempoolSummary, RecentBlockSummary,
+    },
 };
 use bitcoin::{
     BlockHash, Network, OutPoint, Transaction, TxOut, Txid,
@@ -97,6 +100,14 @@ pub trait NodeRpc {
         Err(NodeError::Rpc)
     }
     fn get_block_txids(&self, _hash: &BlockHash) -> Result<Vec<Txid>, NodeError> {
+        Err(NodeError::Rpc)
+    }
+    fn get_block_details(
+        &self,
+        _hash: &BlockHash,
+        _offset: usize,
+        _limit: usize,
+    ) -> Result<BlockDetails, NodeError> {
         Err(NodeError::Rpc)
     }
 }
@@ -405,6 +416,91 @@ impl NodeRpc for BitcoinCoreRpc {
             }
         }
         Ok(txids)
+    }
+    fn get_block_details(
+        &self,
+        hash: &BlockHash,
+        offset: usize,
+        limit: usize,
+    ) -> Result<BlockDetails, NodeError> {
+        #[derive(Deserialize)]
+        struct RawBlockFull {
+            hash: String,
+            height: u64,
+            #[serde(default)]
+            previousblockhash: Option<String>,
+            #[serde(default)]
+            nextblockhash: Option<String>,
+            #[serde(default)]
+            merkleroot: Option<String>,
+            #[serde(default)]
+            version: Option<i32>,
+            time: u64,
+            #[serde(default)]
+            mediantime: Option<u64>,
+            #[serde(default)]
+            bits: Option<String>,
+            #[serde(default)]
+            difficulty: Option<f64>,
+            #[serde(default, rename = "nTx")]
+            n_tx: Option<usize>,
+            #[serde(default)]
+            weight: Option<u64>,
+            #[serde(default)]
+            size: Option<u64>,
+            #[serde(default)]
+            tx: Option<Vec<String>>,
+        }
+        let r: RawBlockFull = self
+            .wire
+            .request(
+                "getblock",
+                &[serde_json::json!(hash.to_string()), serde_json::json!(1)],
+            )
+            .map_err(|e| match e {
+                NodeError::TransactionNotFound => NodeError::BlockNotFound,
+                other => other,
+            })?;
+        let network = self.blockchain_info()?.network.to_string();
+        let all_txs = r.tx.unwrap_or_default();
+        let total = r.n_tx.unwrap_or(all_txs.len());
+        let bounded_limit = limit.clamp(1, 100);
+        let items: Vec<BlockTransactionItem> = all_txs
+            .into_iter()
+            .enumerate()
+            .skip(offset)
+            .take(bounded_limit)
+            .map(|(idx, txid)| BlockTransactionItem {
+                index: idx,
+                txid,
+                is_coinbase: idx == 0,
+            })
+            .collect();
+        let has_more = offset + items.len() < total;
+        let page = BlockTransactionPage {
+            items,
+            offset,
+            limit: bounded_limit,
+            total,
+            has_more,
+        };
+        Ok(BlockDetails {
+            network,
+            height: r.height,
+            hash: r.hash,
+            previous_block_hash: r.previousblockhash,
+            next_block_hash: r.nextblockhash,
+            merkle_root: r.merkleroot,
+            version: r.version,
+            timestamp: r.time,
+            median_time: r.mediantime,
+            bits: r.bits,
+            difficulty: r.difficulty,
+            tx_count: total,
+            weight: r.weight,
+            size: r.size,
+            transactions: page,
+        })
     }
 }
 fn acceptance(
