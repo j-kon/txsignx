@@ -56,34 +56,36 @@ pub(crate) async fn guard(State(state): State<AppState>, req: Request, next: Nex
             }
         }
     };
-    let headers = response.headers_mut();
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    headers.insert(
-        header::X_CONTENT_TYPE_OPTIONS,
-        HeaderValue::from_static("nosniff"),
-    );
-    headers.insert(
-        header::REFERRER_POLICY,
-        HeaderValue::from_static("no-referrer"),
-    );
-    headers.insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
-    );
-    headers.insert(header::VARY, HeaderValue::from_static("Origin"));
-    if origin_ok
-        && host_ok
-        && let Some(origin) = origin
-    {
-        headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+    if response.status() != StatusCode::SWITCHING_PROTOCOLS {
+        let headers = response.headers_mut();
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
         headers.insert(
-            header::ACCESS_CONTROL_ALLOW_METHODS,
-            HeaderValue::from_static("GET, POST"),
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
         );
         headers.insert(
-            header::ACCESS_CONTROL_ALLOW_HEADERS,
-            HeaderValue::from_static("Content-Type"),
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("no-referrer"),
         );
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+        );
+        headers.insert(header::VARY, HeaderValue::from_static("Origin"));
+        if origin_ok
+            && host_ok
+            && let Some(origin) = origin
+        {
+            headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+            headers.insert(
+                header::ACCESS_CONTROL_ALLOW_METHODS,
+                HeaderValue::from_static("GET, POST"),
+            );
+            headers.insert(
+                header::ACCESS_CONTROL_ALLOW_HEADERS,
+                HeaderValue::from_static("Content-Type"),
+            );
+        }
     }
     response
 }

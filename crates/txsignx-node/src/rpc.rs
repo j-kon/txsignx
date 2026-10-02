@@ -1,4 +1,10 @@
-use crate::{NodeError, RpcEndpoint};
+use crate::{
+    NodeError, RpcEndpoint,
+    live::{
+        BlockDetails, BlockTransactionItem, BlockTransactionPage, MAX_RECENT_BLOCKS,
+        MempoolSummary, RecentBlockSummary,
+    },
+};
 use bitcoin::{
     BlockHash, Network, OutPoint, Transaction, TxOut, Txid,
     base64::{Engine, engine::general_purpose::STANDARD},
@@ -6,9 +12,31 @@ use bitcoin::{
 use bitcoincore_rpc::RpcApi;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     path::Path,
     time::{Duration, Instant},
 };
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MempoolEntry {
+    pub vsize: u64,
+    pub weight: u64,
+    #[serde(default)]
+    pub time: Option<u64>,
+    #[serde(default)]
+    pub wtxid: Option<String>,
+    #[serde(default, rename = "bip125-replaceable")]
+    pub bip125_replaceable: Option<bool>,
+    #[serde(default)]
+    pub fees: Option<MempoolEntryFees>,
+    #[serde(default)]
+    pub depends: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MempoolEntryFees {
+    pub base: f64,
+}
 
 #[derive(Debug, Clone)]
 pub struct BlockchainInfo {
@@ -53,6 +81,35 @@ pub trait NodeRpc {
     ) -> Result<MempoolAcceptance, NodeError>;
     fn send_raw_transaction(&self, transaction: &Transaction) -> Result<Txid, NodeError>;
     fn get_raw_transaction(&self, txid: &Txid) -> Result<NodeTransaction, NodeError>;
+    fn mempool_summary(&self) -> Result<MempoolSummary, NodeError> {
+        Err(NodeError::Rpc)
+    }
+    fn raw_mempool_verbose(&self) -> Result<HashMap<Txid, MempoolEntry>, NodeError> {
+        Err(NodeError::Rpc)
+    }
+    fn raw_mempool_txids(&self) -> Result<Vec<Txid>, NodeError> {
+        Err(NodeError::Rpc)
+    }
+    fn block_hash_by_height(&self, _height: u64) -> Result<BlockHash, NodeError> {
+        Err(NodeError::Rpc)
+    }
+    fn get_block_summary(&self, _hash: &BlockHash) -> Result<RecentBlockSummary, NodeError> {
+        Err(NodeError::Rpc)
+    }
+    fn recent_blocks(&self, _count: usize) -> Result<Vec<RecentBlockSummary>, NodeError> {
+        Err(NodeError::Rpc)
+    }
+    fn get_block_txids(&self, _hash: &BlockHash) -> Result<Vec<Txid>, NodeError> {
+        Err(NodeError::Rpc)
+    }
+    fn get_block_details(
+        &self,
+        _hash: &BlockHash,
+        _offset: usize,
+        _limit: usize,
+    ) -> Result<BlockDetails, NodeError> {
+        Err(NodeError::Rpc)
+    }
 }
 pub fn node_network(chain: &str) -> Result<Network, NodeError> {
     match chain {
@@ -242,6 +299,207 @@ impl NodeRpc for BitcoinCoreRpc {
             transaction,
             block_hash: r.blockhash,
             confirmations: r.confirmations,
+        })
+    }
+    fn mempool_summary(&self) -> Result<MempoolSummary, NodeError> {
+        #[derive(Deserialize)]
+        struct RawMempoolInfo {
+            size: usize,
+            #[serde(default)]
+            bytes: Option<u64>,
+            #[serde(default)]
+            usage: Option<u64>,
+            #[serde(default)]
+            total_fee: Option<f64>,
+        }
+        let r: RawMempoolInfo = self.wire.request("getmempoolinfo", &[])?;
+        Ok(MempoolSummary {
+            tx_count: r.size,
+            size_bytes: r.bytes,
+            usage_bytes: r.usage,
+            total_fee_sats: r.total_fee.map(|f| (f * 100_000_000.0).round() as u64),
+        })
+    }
+    fn raw_mempool_verbose(&self) -> Result<HashMap<Txid, MempoolEntry>, NodeError> {
+        let raw: HashMap<String, MempoolEntry> = self
+            .wire
+            .request("getrawmempool", &[serde_json::json!(true)])?;
+        let mut map = HashMap::with_capacity(raw.len());
+        for (k, v) in raw {
+            if let Ok(txid) = k.parse::<Txid>() {
+                map.insert(txid, v);
+            }
+        }
+        Ok(map)
+    }
+    fn raw_mempool_txids(&self) -> Result<Vec<Txid>, NodeError> {
+        let raw: Vec<String> = self
+            .wire
+            .request("getrawmempool", &[serde_json::json!(false)])?;
+        let txids = raw
+            .into_iter()
+            .filter_map(|s| s.parse::<Txid>().ok())
+            .collect();
+        Ok(txids)
+    }
+    fn block_hash_by_height(&self, height: u64) -> Result<BlockHash, NodeError> {
+        let hash_str: String = self
+            .wire
+            .request("getblockhash", &[serde_json::json!(height)])?;
+        hash_str.parse().map_err(|_| NodeError::Rpc)
+    }
+    fn get_block_summary(&self, hash: &BlockHash) -> Result<RecentBlockSummary, NodeError> {
+        #[derive(Deserialize)]
+        struct RawBlock {
+            hash: String,
+            height: u64,
+            #[serde(default, rename = "nTx")]
+            n_tx: Option<usize>,
+            #[serde(default)]
+            size: Option<u64>,
+            #[serde(default)]
+            weight: Option<u64>,
+            #[serde(default)]
+            time: Option<u64>,
+            #[serde(default)]
+            tx: Option<Vec<String>>,
+        }
+        let r: RawBlock = self.wire.request(
+            "getblock",
+            &[serde_json::json!(hash.to_string()), serde_json::json!(1)],
+        )?;
+        let tx_count = r
+            .n_tx
+            .or_else(|| r.tx.as_ref().map(|t| t.len()))
+            .unwrap_or(0);
+        Ok(RecentBlockSummary {
+            height: r.height,
+            hash: r.hash,
+            tx_count,
+            weight: r.weight,
+            size: r.size,
+            timestamp: r.time,
+        })
+    }
+    fn recent_blocks(&self, count: usize) -> Result<Vec<RecentBlockSummary>, NodeError> {
+        let bounded_count = count.clamp(1, MAX_RECENT_BLOCKS);
+        let info = self.blockchain_info()?;
+        let tip_height = info.blocks;
+        let mut blocks = Vec::with_capacity(bounded_count);
+        for i in 0..bounded_count {
+            if tip_height < i as u64 {
+                break;
+            }
+            let h = tip_height - i as u64;
+            let hash = self.block_hash_by_height(h)?;
+            let summary = self.get_block_summary(&hash)?;
+            blocks.push(summary);
+        }
+        Ok(blocks)
+    }
+    fn get_block_txids(&self, hash: &BlockHash) -> Result<Vec<Txid>, NodeError> {
+        #[derive(Deserialize)]
+        struct RawBlockTx {
+            #[serde(default)]
+            tx: Option<Vec<String>>,
+        }
+        let r: RawBlockTx = self.wire.request(
+            "getblock",
+            &[serde_json::json!(hash.to_string()), serde_json::json!(1)],
+        )?;
+        let mut txids = Vec::new();
+        if let Some(list) = r.tx {
+            for s in list {
+                if let Ok(txid) = s.parse::<Txid>() {
+                    txids.push(txid);
+                }
+            }
+        }
+        Ok(txids)
+    }
+    fn get_block_details(
+        &self,
+        hash: &BlockHash,
+        offset: usize,
+        limit: usize,
+    ) -> Result<BlockDetails, NodeError> {
+        #[derive(Deserialize)]
+        struct RawBlockFull {
+            hash: String,
+            height: u64,
+            #[serde(default)]
+            previousblockhash: Option<String>,
+            #[serde(default)]
+            nextblockhash: Option<String>,
+            #[serde(default)]
+            merkleroot: Option<String>,
+            #[serde(default)]
+            version: Option<i32>,
+            time: u64,
+            #[serde(default)]
+            mediantime: Option<u64>,
+            #[serde(default)]
+            bits: Option<String>,
+            #[serde(default)]
+            difficulty: Option<f64>,
+            #[serde(default, rename = "nTx")]
+            n_tx: Option<usize>,
+            #[serde(default)]
+            weight: Option<u64>,
+            #[serde(default)]
+            size: Option<u64>,
+            #[serde(default)]
+            tx: Option<Vec<String>>,
+        }
+        let r: RawBlockFull = self
+            .wire
+            .request(
+                "getblock",
+                &[serde_json::json!(hash.to_string()), serde_json::json!(1)],
+            )
+            .map_err(|e| match e {
+                NodeError::TransactionNotFound => NodeError::BlockNotFound,
+                other => other,
+            })?;
+        let network = self.blockchain_info()?.network.to_string();
+        let all_txs = r.tx.unwrap_or_default();
+        let total = r.n_tx.unwrap_or(all_txs.len());
+        let bounded_limit = limit.clamp(1, 100);
+        let items: Vec<BlockTransactionItem> = all_txs
+            .into_iter()
+            .enumerate()
+            .skip(offset)
+            .take(bounded_limit)
+            .map(|(idx, txid)| BlockTransactionItem {
+                index: idx,
+                txid,
+                is_coinbase: idx == 0,
+            })
+            .collect();
+        let has_more = offset + items.len() < total;
+        let page = BlockTransactionPage {
+            items,
+            offset,
+            limit: bounded_limit,
+            total,
+            has_more,
+        };
+        Ok(BlockDetails {
+            network,
+            height: r.height,
+            hash: r.hash,
+            previous_block_hash: r.previousblockhash,
+            next_block_hash: r.nextblockhash,
+            merkle_root: r.merkleroot,
+            version: r.version,
+            timestamp: r.time,
+            median_time: r.mediantime,
+            bits: r.bits,
+            difficulty: r.difficulty,
+            tx_count: total,
+            weight: r.weight,
+            size: r.size,
+            transactions: page,
         })
     }
 }

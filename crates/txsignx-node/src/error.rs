@@ -26,4 +26,6 @@ pub enum NodeError {
     MempoolRejected,
     #[error("transaction not found in mempool or blockchain (txindex may be required)")]
     TransactionNotFound,
+    #[error("block not found in blockchain")]
+    BlockNotFound,
 }

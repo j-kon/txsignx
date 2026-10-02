@@ -21,6 +21,9 @@ struct Args {
     /// Configured node network: bitcoin, testnet, testnet4, signet, regtest.
     #[arg(long)]
     network: Option<String>,
+    /// Live data source: bitcoin_core, public_mainnet. Can also be set via TXSIGNX_LIVE_SOURCE.
+    #[arg(long)]
+    live_source: Option<String>,
 }
 fn configuration(args: &Args) -> Result<Config, ()> {
     if !args.bind.ip().is_loopback() && !args.allow_external {
@@ -48,6 +51,18 @@ fn configuration(args: &Args) -> Result<Config, ()> {
             .allowed_hosts
             .push(format!("localhost:{}", args.bind.port()));
     }
+
+    let live_source_str = args
+        .live_source
+        .clone()
+        .or_else(|| std::env::var("TXSIGNX_LIVE_SOURCE").ok());
+
+    config.live_source = match live_source_str.as_deref() {
+        Some("public_mainnet") => txsignx_api::config::LiveSourceConfig::PublicMainnet,
+        Some("bitcoin_core") | None => txsignx_api::config::LiveSourceConfig::BitcoinCore,
+        Some(_) => return Err(()),
+    };
+
     config.node = match (&args.rpc_url, &args.rpc_cookie_file, &args.network) {
         (None, None, None) => None,
         (Some(url), Some(cookie), Some(network)) => Some(ConfiguredNode::new(

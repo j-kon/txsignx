@@ -21,6 +21,7 @@ pub struct ConfiguredNode {
     pub network: ConfiguredNetwork,
     pub(crate) observe: Arc<Observe>,
     pub(crate) inspect_tx: Arc<InspectTx>,
+    pub(crate) rpc: Arc<dyn txsignx_node::NodeRpc + Send + Sync>,
 }
 impl ConfiguredNode {
     pub fn new<R: txsignx_node::NodeRpc + Send + Sync + 'static>(
@@ -30,6 +31,7 @@ impl ConfiguredNode {
         let rpc = Arc::new(rpc);
         let rpc_observe = Arc::clone(&rpc);
         let rpc_inspect = Arc::clone(&rpc);
+        let rpc_dyn: Arc<dyn txsignx_node::NodeRpc + Send + Sync> = rpc;
         Self {
             network,
             observe: Arc::new(move |report| {
@@ -42,7 +44,12 @@ impl ConfiguredNode {
                     network.bitcoin_network(),
                 )
             }),
+            rpc: rpc_dyn,
         }
+    }
+
+    pub fn rpc(&self) -> &(dyn txsignx_node::NodeRpc + Send + Sync) {
+        &*self.rpc
     }
 
     pub(crate) fn inspect_transaction(
@@ -59,9 +66,17 @@ impl ConfiguredNode {
         (self.inspect_tx)(txid)
     }
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LiveSourceConfig {
+    #[default]
+    BitcoinCore,
+    PublicMainnet,
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub node: Option<ConfiguredNode>,
+    pub live_source: LiveSourceConfig,
     pub allowed_origins: Vec<String>,
     /// Exact authorities accepted in Host, including ports.
     pub allowed_hosts: Vec<String>,
@@ -71,6 +86,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             node: None,
+            live_source: LiveSourceConfig::default(),
             allowed_origins: vec![
                 "http://localhost:5173".into(),
                 "http://127.0.0.1:5173".into(),
