@@ -96,6 +96,9 @@ pub trait NodeRpc {
     fn recent_blocks(&self, _count: usize) -> Result<Vec<RecentBlockSummary>, NodeError> {
         Err(NodeError::Rpc)
     }
+    fn get_block_txids(&self, _hash: &BlockHash) -> Result<Vec<Txid>, NodeError> {
+        Err(NodeError::Rpc)
+    }
 }
 pub fn node_network(chain: &str) -> Result<Network, NodeError> {
     match chain {
@@ -382,6 +385,26 @@ impl NodeRpc for BitcoinCoreRpc {
             blocks.push(summary);
         }
         Ok(blocks)
+    }
+    fn get_block_txids(&self, hash: &BlockHash) -> Result<Vec<Txid>, NodeError> {
+        #[derive(Deserialize)]
+        struct RawBlockTx {
+            #[serde(default)]
+            tx: Option<Vec<String>>,
+        }
+        let r: RawBlockTx = self.wire.request(
+            "getblock",
+            &[serde_json::json!(hash.to_string()), serde_json::json!(1)],
+        )?;
+        let mut txids = Vec::new();
+        if let Some(list) = r.tx {
+            for s in list {
+                if let Ok(txid) = s.parse::<Txid>() {
+                    txids.push(txid);
+                }
+            }
+        }
+        Ok(txids)
     }
 }
 fn acceptance(

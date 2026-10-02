@@ -21,7 +21,10 @@ struct MockLiveRpc {
     mempool_entries: HashMap<Txid, MempoolEntry>,
     blocks: Vec<RecentBlockSummary>,
     transactions: HashMap<Txid, NodeTransaction>,
+    block_txids: Vec<Txid>,
     should_fail: bool,
+    fail_mempool: bool,
+    fail_blocks: bool,
 }
 
 impl MockLiveRpc {
@@ -55,7 +58,10 @@ impl MockLiveRpc {
                 })
                 .collect(),
             transactions: HashMap::new(),
+            block_txids: Vec::new(),
             should_fail: false,
+            fail_mempool: false,
+            fail_blocks: false,
         }
     }
 }
@@ -101,7 +107,7 @@ impl NodeRpc for MockLiveRpc {
             .ok_or(NodeError::TransactionNotFound)
     }
     fn mempool_summary(&self) -> Result<MempoolSummary, NodeError> {
-        if self.should_fail {
+        if self.should_fail || self.fail_mempool {
             return Err(NodeError::Rpc);
         }
         Ok(self.mempool_summary.clone())
@@ -138,10 +144,16 @@ impl NodeRpc for MockLiveRpc {
         })
     }
     fn recent_blocks(&self, count: usize) -> Result<Vec<RecentBlockSummary>, NodeError> {
-        if self.should_fail {
+        if self.should_fail || self.fail_blocks {
             return Err(NodeError::Rpc);
         }
         Ok(self.blocks.iter().take(count).cloned().collect())
+    }
+    fn get_block_txids(&self, _hash: &BlockHash) -> Result<Vec<Txid>, NodeError> {
+        if self.should_fail {
+            return Err(NodeError::Rpc);
+        }
+        Ok(self.block_txids.clone())
     }
 }
 
@@ -153,7 +165,7 @@ fn create_node_app(mock: MockLiveRpc) -> axum::Router {
     app_with_config(config)
 }
 
-fn test_tx(seed: u8) -> Transaction {
+fn test_tx(seed: u8, rbf: bool) -> Transaction {
     Transaction {
         version: bitcoin::transaction::Version::TWO,
         lock_time: bitcoin::locktime::absolute::LockTime::ZERO,
@@ -163,7 +175,11 @@ fn test_tx(seed: u8) -> Transaction {
                 vout: 0,
             },
             script_sig: ScriptBuf::new(),
-            sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
+            sequence: if rbf {
+                Sequence::ENABLE_RBF_NO_LOCKTIME
+            } else {
+                Sequence::MAX
+            },
             witness: bitcoin::Witness::new(),
         }],
         output: vec![TxOut {
@@ -176,13 +192,12 @@ fn test_tx(seed: u8) -> Transaction {
 #[tokio::test]
 async fn test_snapshot_bounds_and_structure() {
     let mut mock = MockLiveRpc::new(Network::Regtest);
-    // Populate more than MAX_LIVE_TRANSACTIONS (250 entries)
     for i in 0..250u16 {
         let mut b = [0u8; 32];
         b[0] = (i & 0xff) as u8;
         b[1] = (i >> 8) as u8;
         let txid = Txid::from_byte_array(b);
-        let tx = test_tx(i as u8);
+        let tx = test_tx(i as u8, true);
         mock.transactions.insert(
             txid,
             NodeTransaction {
@@ -212,11 +227,154 @@ async fn test_snapshot_bounds_and_structure() {
     let snapshot: LiveSnapshot = serde_json::from_value(body.clone()).unwrap();
     assert_eq!(snapshot.network, "regtest");
     assert_eq!(snapshot.tip_height, 105);
-    // Bounds verified server-side
-    assert!(snapshot.latest_transactions.len() <= MAX_LIVE_TRANSACTIONS);
-    assert_eq!(snapshot.latest_transactions.len(), MAX_LIVE_TRANSACTIONS);
-    assert!(snapshot.recent_blocks.len() <= MAX_RECENT_BLOCKS);
-    assert_eq!(snapshot.recent_blocks.len(), 6);
+
+    let latest_txs = snapshot.latest_transactions.expect("txs present");
+    assert!(latest_txs.len() <= MAX_LIVE_TRANSACTIONS);
+    assert_eq!(latest_txs.len(), MAX_LIVE_TRANSACTIONS);
+
+    let recent_blocks = snapshot.recent_blocks.expect("blocks present");
+    assert!(recent_blocks.len() <= MAX_RECENT_BLOCKS);
+    assert_eq!(recent_blocks.len(), 6);
+
+    let mempool = snapshot.mempool.expect("mempool present");
+    assert_eq!(mempool.tx_count, 2);
+    assert_eq!(snapshot.mempool_tx_count, Some(2));
+}
+
+#[tokio::test]
+async fn test_no_fabricated_facts_when_raw_tx_unavailable() {
+    let mut mock = MockLiveRpc::new(Network::Regtest);
+    let txid = Txid::from_byte_array([42; 32]);
+
+    // Insert into mempool verbose entry, but do NOT provide raw transaction
+    mock.mempool_entries.insert(
+        txid,
+        MempoolEntry {
+            vsize: 180,
+            weight: 720,
+            time: Some(1700000042),
+            wtxid: Some("wtxid_test".to_string()),
+            bip125_replaceable: Some(true),
+            fees: Some(MempoolEntryFees { base: 0.00001800 }),
+            depends: None,
+        },
+    );
+
+    let app = create_node_app(mock);
+    let (status, body) = request(app, "GET", "/api/v1/live/snapshot", Value::Null).await;
+    assert_eq!(status, 200);
+
+    let snapshot: LiveSnapshot = serde_json::from_value(body).unwrap();
+    let txs = snapshot.latest_transactions.unwrap();
+    let found = txs.iter().find(|t| t.txid == txid.to_string()).unwrap();
+
+    // Verify facts are NOT fabricated:
+    assert_eq!(found.input_count, None);
+    assert_eq!(found.output_count, None);
+    assert_eq!(found.explicit_rbf, None);
+    // Mempool replaceability from node observation is preserved
+    assert_eq!(found.mempool_replaceable, Some(true));
+}
+
+#[tokio::test]
+async fn test_explicit_rbf_derived_only_from_own_sequence() {
+    let mut mock = MockLiveRpc::new(Network::Regtest);
+
+    // Tx1: sequence has RBF disabled, but mempool entry claims bip125_replaceable = true (e.g. inherited)
+    let txid_no_rbf = Txid::from_byte_array([1; 32]);
+    let tx_no_rbf = test_tx(1, false);
+    mock.transactions.insert(
+        txid_no_rbf,
+        NodeTransaction {
+            transaction: tx_no_rbf,
+            block_hash: None,
+            confirmations: None,
+        },
+    );
+    mock.mempool_entries.insert(
+        txid_no_rbf,
+        MempoolEntry {
+            vsize: 140,
+            weight: 560,
+            time: Some(1700000001),
+            wtxid: None,
+            bip125_replaceable: Some(true), // inherited
+            fees: Some(MempoolEntryFees { base: 0.00001400 }),
+            depends: None,
+        },
+    );
+
+    // Tx2: sequence has RBF enabled, but mempool entry says false/None
+    let txid_rbf = Txid::from_byte_array([2; 32]);
+    let tx_rbf = test_tx(2, true);
+    mock.transactions.insert(
+        txid_rbf,
+        NodeTransaction {
+            transaction: tx_rbf,
+            block_hash: None,
+            confirmations: None,
+        },
+    );
+    mock.mempool_entries.insert(
+        txid_rbf,
+        MempoolEntry {
+            vsize: 140,
+            weight: 560,
+            time: Some(1700000002),
+            wtxid: None,
+            bip125_replaceable: Some(false),
+            fees: Some(MempoolEntryFees { base: 0.00001400 }),
+            depends: None,
+        },
+    );
+
+    let app = create_node_app(mock);
+    let (status, body) = request(app, "GET", "/api/v1/live/snapshot", Value::Null).await;
+    assert_eq!(status, 200);
+
+    let snapshot: LiveSnapshot = serde_json::from_value(body).unwrap();
+    let txs = snapshot.latest_transactions.unwrap();
+
+    let summary_no_rbf = txs
+        .iter()
+        .find(|t| t.txid == txid_no_rbf.to_string())
+        .unwrap();
+    assert_eq!(summary_no_rbf.explicit_rbf, Some(false));
+    assert_eq!(summary_no_rbf.mempool_replaceable, Some(true));
+
+    let summary_rbf = txs.iter().find(|t| t.txid == txid_rbf.to_string()).unwrap();
+    assert_eq!(summary_rbf.explicit_rbf, Some(true));
+    assert_eq!(summary_rbf.mempool_replaceable, Some(false));
+}
+
+#[tokio::test]
+async fn test_mempool_rpc_failure_is_not_empty_mempool() {
+    let mut mock = MockLiveRpc::new(Network::Regtest);
+    mock.fail_mempool = true;
+
+    let app = create_node_app(mock);
+    let (status, body) = request(app, "GET", "/api/v1/live/snapshot", Value::Null).await;
+    assert_eq!(status, 200);
+
+    let snapshot: LiveSnapshot = serde_json::from_value(body).unwrap();
+    // Mempool RPC failure must be None, NOT Some(0) or empty
+    assert_eq!(snapshot.mempool, None);
+    assert_eq!(snapshot.mempool_tx_count, None);
+    assert_eq!(snapshot.mempool_size_bytes, None);
+}
+
+#[tokio::test]
+async fn test_recent_blocks_rpc_failure_is_not_empty_chain() {
+    let mut mock = MockLiveRpc::new(Network::Regtest);
+    mock.fail_blocks = true;
+
+    let app = create_node_app(mock);
+    let (status, body) = request(app, "GET", "/api/v1/live/snapshot", Value::Null).await;
+    assert_eq!(status, 200);
+
+    let snapshot: LiveSnapshot = serde_json::from_value(body).unwrap();
+    // Recent block RPC failure must be None, NOT Some([])
+    assert_eq!(snapshot.recent_blocks, None);
 }
 
 #[tokio::test]
@@ -301,10 +459,11 @@ fn test_stream_event_serialization() {
         weight: 564,
         fee_sats: Some(1410),
         fee_rate: Some(10.0),
-        input_count: 1,
-        output_count: 2,
-        explicit_rbf: true,
-        has_witness: true,
+        input_count: Some(1),
+        output_count: Some(2),
+        explicit_rbf: Some(true),
+        mempool_replaceable: Some(true),
+        has_witness: Some(true),
         first_seen_at: Some(1700000000),
         depends: Some(vec!["parent_txid_1".to_string()]),
     };
@@ -318,6 +477,13 @@ fn test_stream_event_serialization() {
         timestamp: Some(1700000000),
     };
 
+    let mempool_summary = MempoolSummary {
+        tx_count: 5,
+        size_bytes: Some(1200),
+        usage_bytes: Some(4000),
+        total_fee_sats: Some(8000),
+    };
+
     let events = vec![
         LiveEvent::TransactionAdded(tx_summary.clone()),
         LiveEvent::TransactionRemoved {
@@ -329,6 +495,7 @@ fn test_stream_event_serialization() {
             block_height: 101,
         },
         LiveEvent::BlockConnected(block_summary),
+        LiveEvent::MempoolUpdated(mempool_summary),
     ];
 
     for event in events {
@@ -346,14 +513,12 @@ fn test_stream_event_serialization() {
 async fn test_slow_subscriber_backpressure() {
     let (tx, mut rx) = tokio::sync::broadcast::channel::<LiveEvent>(16);
 
-    // Send 32 events into a channel of capacity 16
     for i in 0..32 {
         let _ = tx.send(LiveEvent::TransactionRemoved {
             txid: format!("tx_{}", i),
         });
     }
 
-    // A slow receiver will see Lagged
     match rx.recv().await {
         Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
             assert!(missed > 0);
@@ -361,7 +526,6 @@ async fn test_slow_subscriber_backpressure() {
         other => panic!("expected Lagged error, got {:?}", other),
     }
 
-    // Next recv succeeds with the latest event
     let event = rx.recv().await.expect("recv succeeds after catch-up");
     if let LiveEvent::TransactionRemoved { txid } = event {
         assert!(txid.starts_with("tx_"));

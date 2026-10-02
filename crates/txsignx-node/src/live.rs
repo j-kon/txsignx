@@ -38,10 +38,16 @@ pub struct LiveTransactionSummary {
     pub fee_sats: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fee_rate: Option<f64>,
-    pub input_count: usize,
-    pub output_count: usize,
-    pub explicit_rbf: bool,
-    pub has_witness: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explicit_rbf: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mempool_replaceable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_witness: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_seen_at: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,11 +59,16 @@ pub struct LiveSnapshot {
     pub network: String,
     pub tip_height: u64,
     pub tip_hash: String,
-    pub recent_blocks: Vec<RecentBlockSummary>,
-    pub mempool_tx_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recent_blocks: Option<Vec<RecentBlockSummary>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mempool: Option<MempoolSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mempool_tx_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mempool_size_bytes: Option<u64>,
-    pub latest_transactions: Vec<LiveTransactionSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_transactions: Option<Vec<LiveTransactionSummary>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -74,4 +85,5 @@ pub enum LiveEvent {
         block_height: u64,
     },
     BlockConnected(RecentBlockSummary),
+    MempoolUpdated(MempoolSummary),
 }

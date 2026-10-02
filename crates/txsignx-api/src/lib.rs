@@ -7,6 +7,7 @@ pub mod routes;
 mod security;
 pub use config::{Config, ConfiguredNode};
 pub(crate) use live_service::LiveService;
+pub use live_service::MAX_WS_CLIENTS;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 #[derive(Clone)]
