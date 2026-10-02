@@ -76,8 +76,10 @@ pub struct LiveTransactionSummary {
     pub txid: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wtxid: Option<String>,
-    pub vsize: u64,
-    pub weight: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vsize: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weight: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fee_sats: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -94,6 +96,8 @@ pub struct LiveTransactionSummary {
     pub has_witness: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_seen_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depends: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]

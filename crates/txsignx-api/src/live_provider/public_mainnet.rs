@@ -133,6 +133,7 @@ struct UpstreamTxStatus {
 pub struct PublicMainnetLiveProvider {
     base_url: String,
     ws_url: String,
+    resolve_ip: Option<std::net::SocketAddr>,
     http_client: reqwest::Client,
     tx_cache: RwLock<HashMap<String, LiveTransactionSummary>>,
     tx_ring: RwLock<VecDeque<String>>,
@@ -157,9 +158,23 @@ impl PublicMainnetLiveProvider {
         let (hydration_tx, hydration_rx) = mpsc::channel(MAX_TRANSACTION_HYDRATION_QUEUE);
 
         let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(10));
-        if base_url.contains("mempool.space") {
-            if let Ok(addr) = "103.165.192.202:443".parse::<std::net::SocketAddr>() {
-                builder = builder.resolve("mempool.space", addr);
+        let mut resolve_ip = None;
+        if base_url.contains("mempool.space")
+            && let Ok(override_ip) = std::env::var("TXSIGNX_PUBLIC_PROVIDER_RESOLVE_IP")
+        {
+            let override_ip = override_ip.trim();
+            if !override_ip.is_empty() {
+                let addr = if override_ip.contains(':') {
+                    override_ip.parse::<std::net::SocketAddr>().ok()
+                } else if let Ok(ip) = override_ip.parse::<std::net::IpAddr>() {
+                    Some(std::net::SocketAddr::new(ip, 443))
+                } else {
+                    None
+                };
+                if let Some(socket_addr) = addr {
+                    builder = builder.resolve("mempool.space", socket_addr);
+                    resolve_ip = Some(socket_addr);
+                }
             }
         }
         let http_client = builder.build().unwrap_or_default();
@@ -167,6 +182,7 @@ impl PublicMainnetLiveProvider {
         let provider = Arc::new(Self {
             base_url,
             ws_url,
+            resolve_ip,
             http_client,
             tx_cache: RwLock::new(HashMap::new()),
             tx_ring: RwLock::new(VecDeque::new()),
@@ -262,28 +278,25 @@ impl PublicMainnetLiveProvider {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
 
-            for (i, tx) in recent_txs.into_iter().enumerate() {
-                let first_seen = now.saturating_sub((i as u64) * 2);
+            for tx in recent_txs {
+                let fee_rate = match (tx.fee, tx.vsize) {
+                    (Some(f), Some(v)) if v > 0 => Some(f as f64 / v as f64),
+                    _ => None,
+                };
                 let summary = LiveTransactionSummary {
                     txid: tx.txid.clone(),
                     wtxid: None,
-                    vsize: tx.vsize.unwrap_or(140),
-                    weight: tx.vsize.unwrap_or(140) * 4,
+                    vsize: tx.vsize,
+                    weight: tx.vsize.map(|v| v * 4),
                     fee_sats: tx.fee,
-                    fee_rate: tx.fee.and_then(|f| {
-                        let vs = tx.vsize.unwrap_or(140);
-                        if vs > 0 {
-                            Some(f as f64 / vs as f64)
-                        } else {
-                            None
-                        }
-                    }),
+                    fee_rate,
                     input_count: None,
                     output_count: None,
                     explicit_rbf: None,
                     mempool_replaceable: None,
                     has_witness: None,
-                    first_seen_at: Some(first_seen),
+                    first_seen_at: None,
+                    observed_at: Some(now),
                     depends: None,
                     source: Some("public_mainnet".to_string()),
                     hydration_status: Some("pending".to_string()),
@@ -324,7 +337,22 @@ impl PublicMainnetLiveProvider {
             self.connection_status
                 .store(STATUS_CONNECTING, Ordering::SeqCst);
 
-            match connect_async(&self.ws_url).await {
+            let connect_res = if let Some(addr) = self.resolve_ip {
+                match tokio::net::TcpStream::connect(addr).await {
+                    Ok(tcp) => match tokio_tungstenite::client_async_tls(&self.ws_url, tcp).await {
+                        Ok(pair) => Ok(pair),
+                        Err(e) => Err(format!("TLS WS error: {e}")),
+                    },
+                    Err(e) => Err(format!("TCP connect error to {addr}: {e}")),
+                }
+            } else {
+                match connect_async(&self.ws_url).await {
+                    Ok(pair) => Ok(pair),
+                    Err(e) => Err(format!("WS connect error: {e}")),
+                }
+            };
+
+            match connect_res {
                 Ok((ws_stream, _)) => {
                     self.connection_status
                         .store(STATUS_CONNECTED, Ordering::SeqCst);
@@ -365,8 +393,8 @@ impl PublicMainnetLiveProvider {
                         }
                     }
                 }
-                Err(_) => {
-                    // Connection failed
+                Err(err) => {
+                    eprintln!("WS connect error: {:?}", err);
                 }
             }
 
@@ -394,8 +422,8 @@ impl PublicMainnetLiveProvider {
                 let summary = LiveTransactionSummary {
                     txid: txid.clone(),
                     wtxid: None,
-                    vsize: 140,
-                    weight: 560,
+                    vsize: None,
+                    weight: None,
                     fee_sats: None,
                     fee_rate: None,
                     input_count: None,
@@ -403,7 +431,8 @@ impl PublicMainnetLiveProvider {
                     explicit_rbf: None,
                     mempool_replaceable: None,
                     has_witness: None,
-                    first_seen_at: Some(now),
+                    first_seen_at: None,
+                    observed_at: Some(now),
                     depends: None,
                     source: Some("public_mainnet".to_string()),
                     hydration_status: Some("pending".to_string()),
@@ -502,8 +531,8 @@ impl PublicMainnetLiveProvider {
         {
             let mut cache = self.tx_cache.write().await;
             if let Some(existing) = cache.get_mut(txid) {
-                existing.vsize = vsize;
-                existing.weight = details.weight;
+                existing.vsize = Some(vsize);
+                existing.weight = Some(details.weight);
                 existing.fee_sats = Some(details.fee);
                 existing.fee_rate = fee_rate;
                 existing.input_count = Some(details.vin.len());
@@ -549,8 +578,8 @@ impl LiveDataProvider for PublicMainnetLiveProvider {
             let mut latest_transactions: Vec<LiveTransactionSummary> =
                 self.tx_cache.read().await.values().cloned().collect();
 
-            latest_transactions.sort_by_key(|b| std::cmp::Reverse(b.first_seen_at.unwrap_or(0)));
-            latest_transactions.truncate(300);
+            latest_transactions.sort_by_key(|b| std::cmp::Reverse(b.observed_at.unwrap_or(0)));
+            latest_transactions.truncate(MAX_RECENT_TX_CACHE);
 
             Ok(LiveSnapshot {
                 network: "bitcoin".to_string(),

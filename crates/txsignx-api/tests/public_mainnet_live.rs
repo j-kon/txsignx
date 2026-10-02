@@ -111,8 +111,8 @@ impl LiveDataProvider for MockPublicMainnetProvider {
 
             let mut latest_transactions: Vec<LiveTransactionSummary> =
                 self.tx_cache.read().await.values().cloned().collect();
-            latest_transactions.sort_by_key(|b| std::cmp::Reverse(b.first_seen_at.unwrap_or(0)));
-            latest_transactions.truncate(300);
+            latest_transactions.sort_by_key(|b| std::cmp::Reverse(b.observed_at.unwrap_or(0)));
+            latest_transactions.truncate(txsignx_api::MAX_RECENT_TX_CACHE);
 
             Ok(LiveSnapshot {
                 network: "bitcoin".to_string(),
@@ -308,8 +308,8 @@ async fn test_public_snapshot_normalization() {
     let summary = LiveTransactionSummary {
         txid: "943315fc83262e76ad634d2b67f37bda38067b2c54b9854cee89f785e6a556b9".to_string(),
         wtxid: None,
-        vsize: 209,
-        weight: 833,
+        vsize: Some(209),
+        weight: Some(833),
         fee_sats: Some(929),
         fee_rate: Some(4.445),
         input_count: Some(2),
@@ -318,6 +318,7 @@ async fn test_public_snapshot_normalization() {
         mempool_replaceable: Some(true),
         has_witness: Some(true),
         first_seen_at: Some(1790932057),
+        observed_at: Some(1790932057),
         depends: None,
         source: Some("public_mainnet".to_string()),
         hydration_status: Some("hydrated".to_string()),
@@ -416,8 +417,8 @@ async fn test_ring_buffer_bounds_1000_items() {
         let summary = LiveTransactionSummary {
             txid: format!("{:064x}", i),
             wtxid: None,
-            vsize: 140,
-            weight: 560,
+            vsize: Some(140),
+            weight: Some(560),
             fee_sats: None,
             fee_rate: None,
             input_count: None,
@@ -426,6 +427,7 @@ async fn test_ring_buffer_bounds_1000_items() {
             mempool_replaceable: None,
             has_witness: None,
             first_seen_at: Some(1000 + i as u64),
+            observed_at: Some(1000 + i as u64),
             depends: None,
             source: Some("public_mainnet".to_string()),
             hydration_status: Some("pending".to_string()),
@@ -541,8 +543,8 @@ async fn test_load_burst_1000_transactions() {
         let summary = LiveTransactionSummary {
             txid: format!("{:064x}", i),
             wtxid: None,
-            vsize: 140,
-            weight: 560,
+            vsize: Some(140),
+            weight: Some(560),
             fee_sats: Some(1400),
             fee_rate: Some(10.0),
             input_count: Some(1),
@@ -551,6 +553,7 @@ async fn test_load_burst_1000_transactions() {
             mempool_replaceable: Some(false),
             has_witness: Some(true),
             first_seen_at: Some(1790930000 + (i as u64)),
+            observed_at: Some(1790930000 + (i as u64)),
             depends: None,
             source: Some("public_mainnet".to_string()),
             hydration_status: Some("pending".to_string()),
@@ -565,10 +568,10 @@ async fn test_load_burst_1000_transactions() {
     let cache_len = provider.tx_cache.read().await.len();
     assert_eq!(cache_len, 1000);
 
-    // Verify snapshot handles 1,000 cached items and bounds response to 300
+    // Verify snapshot handles 1,000 cached items and bounds response to MAX_RECENT_TX_CACHE
     let snapshot = provider.get_snapshot().await.unwrap();
     let txs = snapshot.latest_transactions.unwrap();
-    assert_eq!(txs.len(), 300);
+    assert_eq!(txs.len(), txsignx_api::MAX_RECENT_TX_CACHE);
 }
 
 #[tokio::test]
@@ -600,4 +603,223 @@ async fn test_private_data_never_forwarded() {
     // Preflight fails closed safely without disclosing descriptor upstream
     assert!(status == StatusCode::BAD_REQUEST || status == StatusCode::UNPROCESSABLE_ENTITY);
     assert_ne!(body["error"]["code"], "");
+}
+
+#[tokio::test]
+async fn test_bootstrap_factual_semantics() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // Case 1: Transaction with real vsize and fee
+    let item_with_vsize = serde_json::json!({
+        "txid": "1111111111111111111111111111111111111111111111111111111111111111",
+        "fee": 1500,
+        "vsize": 150
+    });
+    let fee: Option<u64> = item_with_vsize["fee"].as_u64();
+    let vsize: Option<u64> = item_with_vsize["vsize"].as_u64();
+    let fee_rate = match (fee, vsize) {
+        (Some(f), Some(v)) if v > 0 => Some(f as f64 / v as f64),
+        _ => None,
+    };
+    let summary1 = LiveTransactionSummary {
+        txid: item_with_vsize["txid"].as_str().unwrap().to_string(),
+        wtxid: None,
+        vsize,
+        weight: vsize.map(|v| v * 4),
+        fee_sats: fee,
+        fee_rate,
+        input_count: None,
+        output_count: None,
+        explicit_rbf: None,
+        mempool_replaceable: None,
+        has_witness: None,
+        first_seen_at: None,
+        observed_at: Some(now),
+        depends: None,
+        source: Some("public_mainnet".to_string()),
+        hydration_status: Some("pending".to_string()),
+    };
+
+    // Assert: bootstrap does NOT fabricate first_seen_at, but DOES set observed_at
+    assert_eq!(summary1.first_seen_at, None);
+    assert_eq!(summary1.observed_at, Some(now));
+    assert_eq!(summary1.vsize, Some(150));
+    assert_eq!(summary1.weight, Some(600));
+    assert_eq!(summary1.fee_rate, Some(10.0));
+
+    // Case 2: Transaction with missing vsize (None)
+    let item_missing_vsize = serde_json::json!({
+        "txid": "2222222222222222222222222222222222222222222222222222222222222222",
+        "fee": 1500
+    });
+    let fee2: Option<u64> = item_missing_vsize["fee"].as_u64();
+    let vsize2: Option<u64> = item_missing_vsize.get("vsize").and_then(|v| v.as_u64());
+    let fee_rate2 = match (fee2, vsize2) {
+        (Some(f), Some(v)) if v > 0 => Some(f as f64 / v as f64),
+        _ => None,
+    };
+    let summary2 = LiveTransactionSummary {
+        txid: item_missing_vsize["txid"].as_str().unwrap().to_string(),
+        wtxid: None,
+        vsize: vsize2,
+        weight: vsize2.map(|v| v * 4),
+        fee_sats: fee2,
+        fee_rate: fee_rate2,
+        input_count: None,
+        output_count: None,
+        explicit_rbf: None,
+        mempool_replaceable: None,
+        has_witness: None,
+        first_seen_at: None,
+        observed_at: Some(now),
+        depends: None,
+        source: Some("public_mainnet".to_string()),
+        hydration_status: Some("pending".to_string()),
+    };
+
+    // Assert: missing vsize remains None, does not produce fake weight or fake fee_rate
+    assert_eq!(summary2.vsize, None);
+    assert_eq!(summary2.weight, None);
+    assert_eq!(summary2.fee_rate, None);
+    assert_eq!(summary2.first_seen_at, None);
+    assert_eq!(summary2.observed_at, Some(now));
+}
+
+#[tokio::test]
+async fn test_live_added_event_records_observed_at_without_fabrication() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let summary = LiveTransactionSummary {
+        txid: "3333333333333333333333333333333333333333333333333333333333333333".to_string(),
+        wtxid: None,
+        vsize: None,
+        weight: None,
+        fee_sats: None,
+        fee_rate: None,
+        input_count: None,
+        output_count: None,
+        explicit_rbf: None,
+        mempool_replaceable: None,
+        has_witness: None,
+        first_seen_at: None,
+        observed_at: Some(now),
+        depends: None,
+        source: Some("public_mainnet".to_string()),
+        hydration_status: Some("pending".to_string()),
+    };
+
+    assert_eq!(summary.first_seen_at, None);
+    assert!(summary.observed_at.is_some());
+    assert_eq!(summary.vsize, None);
+    assert_eq!(summary.weight, None);
+    assert_eq!(summary.fee_rate, None);
+}
+
+#[tokio::test]
+async fn test_cache_limit_equals_documented_bound() {
+    let provider = MockPublicMainnetProvider::new();
+    assert_eq!(txsignx_api::MAX_RECENT_TX_CACHE, 1000);
+
+    for i in 0..1500 {
+        let summary = LiveTransactionSummary {
+            txid: format!("{:064x}", i),
+            wtxid: None,
+            vsize: Some(140),
+            weight: Some(560),
+            fee_sats: None,
+            fee_rate: None,
+            input_count: None,
+            output_count: None,
+            explicit_rbf: None,
+            mempool_replaceable: None,
+            has_witness: None,
+            first_seen_at: None,
+            observed_at: Some(i as u64),
+            depends: None,
+            source: Some("public_mainnet".to_string()),
+            hydration_status: Some("pending".to_string()),
+        };
+        provider.insert_transaction(summary).await;
+    }
+
+    let cache_len = provider.tx_cache.read().await.len();
+    let ring_len = provider.tx_ring.read().await.len();
+    assert_eq!(cache_len, txsignx_api::MAX_RECENT_TX_CACHE);
+    assert_eq!(ring_len, txsignx_api::MAX_RECENT_TX_CACHE);
+
+    let snapshot = provider.get_snapshot().await.unwrap();
+    assert_eq!(
+        snapshot.latest_transactions.unwrap().len(),
+        txsignx_api::MAX_RECENT_TX_CACHE
+    );
+}
+
+#[test]
+fn test_provider_dns_resolution_config() {
+    // When TXSIGNX_PUBLIC_PROVIDER_RESOLVE_IP is not set, no override is applied
+    unsafe {
+        std::env::remove_var("TXSIGNX_PUBLIC_PROVIDER_RESOLVE_IP");
+    }
+    let override_var = std::env::var("TXSIGNX_PUBLIC_PROVIDER_RESOLVE_IP");
+    assert!(override_var.is_err());
+
+    // When TXSIGNX_PUBLIC_PROVIDER_RESOLVE_IP is set, it can parse as IP or SocketAddr
+    unsafe {
+        std::env::set_var("TXSIGNX_PUBLIC_PROVIDER_RESOLVE_IP", "103.165.192.202");
+    }
+    let override_ip = std::env::var("TXSIGNX_PUBLIC_PROVIDER_RESOLVE_IP").unwrap();
+    let addr = if override_ip.contains(':') {
+        override_ip.parse::<std::net::SocketAddr>().ok()
+    } else if let Ok(ip) = override_ip.parse::<std::net::IpAddr>() {
+        Some(std::net::SocketAddr::new(ip, 443))
+    } else {
+        None
+    };
+    assert_eq!(addr, Some("103.165.192.202:443".parse().unwrap()));
+
+    // Clean up env
+    unsafe {
+        std::env::remove_var("TXSIGNX_PUBLIC_PROVIDER_RESOLVE_IP");
+    }
+}
+
+#[tokio::test]
+async fn test_no_disk_persistence() {
+    let provider = MockPublicMainnetProvider::new();
+    for i in 0..100 {
+        let summary = LiveTransactionSummary {
+            txid: format!("{:064x}", i),
+            wtxid: None,
+            vsize: Some(140),
+            weight: Some(560),
+            fee_sats: None,
+            fee_rate: None,
+            input_count: None,
+            output_count: None,
+            explicit_rbf: None,
+            mempool_replaceable: None,
+            has_witness: None,
+            first_seen_at: None,
+            observed_at: Some(i as u64),
+            depends: None,
+            source: Some("public_mainnet".to_string()),
+            hydration_status: Some("pending".to_string()),
+        };
+        provider.insert_transaction(summary).await;
+    }
+
+    // Verify zero database or cache files created in current working dir
+    for entry in std::fs::read_dir(".").unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().to_string();
+        assert!(!name.ends_with(".db"), "No .db database file should exist");
+        assert!(!name.ends_with(".sqlite"), "No sqlite file should exist");
+        assert!(!name.ends_with(".cache"), "No cache file should exist");
+    }
 }

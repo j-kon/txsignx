@@ -9,6 +9,7 @@ mod security;
 pub use config::{Config, ConfiguredNode};
 pub use error::ApiError;
 pub use live_provider::LiveDataProvider;
+pub use live_provider::MAX_RECENT_TX_CACHE;
 pub(crate) use live_service::LiveService;
 pub use live_service::MAX_WS_CLIENTS;
 use std::sync::Arc;

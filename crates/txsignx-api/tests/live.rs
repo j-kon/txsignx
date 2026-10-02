@@ -506,8 +506,8 @@ fn test_stream_event_serialization() {
     let tx_summary = LiveTransactionSummary {
         txid: "abcdef123456".to_string(),
         wtxid: Some("fedcba654321".to_string()),
-        vsize: 141,
-        weight: 564,
+        vsize: Some(141),
+        weight: Some(564),
         fee_sats: Some(1410),
         fee_rate: Some(10.0),
         input_count: Some(1),
@@ -516,6 +516,7 @@ fn test_stream_event_serialization() {
         mempool_replaceable: Some(true),
         has_witness: Some(true),
         first_seen_at: Some(1700000000),
+        observed_at: Some(1700000000),
         depends: Some(vec!["parent_txid_1".to_string()]),
         source: None,
         hydration_status: None,

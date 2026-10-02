@@ -50,3 +50,4 @@ pub trait LiveDataProvider: Send + Sync {
 }
 
 pub type DynLiveProvider = Arc<dyn LiveDataProvider>;
+pub use public_mainnet::MAX_RECENT_TX_CACHE;
