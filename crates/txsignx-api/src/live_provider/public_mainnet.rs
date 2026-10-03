@@ -147,10 +147,11 @@ pub struct PublicMainnetLiveProvider {
 
 impl PublicMainnetLiveProvider {
     pub fn new() -> Arc<Self> {
-        Self::with_endpoints(
-            "https://mempool.space/api".to_string(),
-            "wss://mempool.space/api/v1/ws".to_string(),
-        )
+        let base_url = std::env::var("TXSIGNX_PUBLIC_BASE_URL")
+            .unwrap_or_else(|_| "https://mempool.space/api".to_string());
+        let ws_url = std::env::var("TXSIGNX_PUBLIC_WS_URL")
+            .unwrap_or_else(|_| "wss://mempool.space/api/v1/ws".to_string());
+        Self::with_endpoints(base_url, ws_url)
     }
 
     pub fn with_endpoints(base_url: String, ws_url: String) -> Arc<Self> {
