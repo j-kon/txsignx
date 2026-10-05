@@ -4,6 +4,22 @@
 
 TxSignX is a Rust-based Bitcoin Transaction Explorer and pre-signing security analyzer. It decodes raw transaction hex, fetches transaction IDs via Bitcoin Core, and inspects PSBT v0 / BIP174 packages. It delivers factual transaction reports and deterministic policy evaluation before keys ever touch a transaction.
 
+## 🎥 Demo Video
+
+[▶ Watch the TxSignX Demo on Loom](https://www.loom.com/share/a6853cc366ef4c419085bb0ee5c599b4)
+
+The demo covers TxSignX transaction inspection and policy workflows:
+- **Raw transaction decoding**: Consensus-serialized hex parsing without network assumptions.
+- **TXID lookup using Bitcoin Core**: Node-contextualized lookup for confirmed and mempool transactions.
+- **Transaction field inspection**: Version, locktime, input sequences, and output values.
+- **Script and witness analysis**: Disassembly across standard script types and witness stack inspection.
+- **SegWit and explicit RBF detection**: Witness detection and explicit sequence opt-in RBF signaling (`nSequence < 0xFFFFFFFE`).
+- **Size, weight, and vsize calculations**: Factual serialization dimensions and consensus weight metrics.
+- **Fee and fee-rate calculation from resolved prevouts**: Input/output summation, absolute fee, and sat/vB rate when prevouts are resolved.
+- **Confirmed and mempool transaction analysis**: Block hash and confirmation depth for confirmed transactions, mempool state for unconfirmed transactions.
+- **PSBT v0 preflight**: Pre-signing security inspection for BIP174 packages.
+- **Deterministic PASS, REVIEW, and BLOCK policy decisions**: Rule-driven policy evaluations with scoped results (PASS is never a universal safety guarantee).
+
 ## MVP Features
 
 TxSignX inspects transactions across three primary input forms:
@@ -128,7 +144,7 @@ Transaction ID request:
 
 ### Web
 
-`txsignx-web` provides a local browser interface for:
+The browser presentation layer is available in the [TxSignX Web repository](https://github.com/j-kon/txsignx-web). `txsignx-web` provides a local user interface for:
 - PSBT v0 inspection and policy preflight
 - Raw Transaction mode with optional network-aware address rendering
 - Transaction ID mode backed by the configured local API
@@ -161,8 +177,8 @@ txsignx/
 └── scripts/
 ```
 
-- Web: `txsignx-web`
-- Docs: `txsignx-docs`
+- Web Frontend: [TxSignX Web (`txsignx-web`)](https://github.com/j-kon/txsignx-web)
+- Documentation: `txsignx-docs`
 
 ## Capstone
 
